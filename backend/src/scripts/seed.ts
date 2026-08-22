@@ -8,6 +8,7 @@ import Activity from '../models/Activity';
 import Trip from '../models/Trip';
 import TripStop from '../models/TripStop';
 import ItinerarySection, { ItinerarySectionType } from '../models/ItinerarySection';
+import Expense from '../models/Expense';
 import User from '../models/User';
 import { hashPassword } from '../utils/password';
 
@@ -428,6 +429,10 @@ async function seed() {
             endDate: new Date('2026-10-08'),
             cities: [delhiId, jaipurId],
             status: 'PLANNING',
+            budget: {
+              totalBudget: 75000,
+              currency: 'INR',
+            },
           },
         },
         { upsert: true, new: true }
@@ -529,7 +534,65 @@ async function seed() {
         { upsert: true, new: true }
       );
 
-      console.log(`Sample itinerary seeded for trip "${sampleTrip.title}" with 2 stops and 3 sections`);
+      // Seed sample expenses for budget tracking
+      const sampleExpenses = [
+        {
+          title: 'Train Tickets (Delhi to Jaipur)',
+          amount: 2400,
+          currency: 'INR',
+          category: 'TRANSPORT',
+          date: new Date('2026-10-04'),
+          notes: 'Vande Bharat Express AC Chair Car',
+        },
+        {
+          title: 'Heritage Haveli Hotel (Jaipur 4 nights)',
+          amount: 22000,
+          currency: 'INR',
+          category: 'ACCOMMODATION',
+          date: new Date('2026-10-04'),
+          notes: 'Traditional boutique stay in Old City',
+        },
+        {
+          title: 'Traditional Rajasthani Thali & Snacks',
+          amount: 3500,
+          currency: 'INR',
+          category: 'FOOD',
+          date: new Date('2026-10-05'),
+          notes: 'Chokhi Dhani dinner experience',
+        },
+        {
+          title: 'Amber Fort & City Palace Guided Tour',
+          amount: 1800,
+          currency: 'INR',
+          category: 'ACTIVITY',
+          date: new Date('2026-10-05'),
+          notes: 'Composite entry ticket and audio guide',
+        },
+        {
+          title: 'Block Print Textiles & Blue Pottery',
+          amount: 6200,
+          currency: 'INR',
+          category: 'SHOPPING',
+          date: new Date('2026-10-06'),
+          notes: 'Johari and Bapu Bazaars souvenirs',
+        },
+      ];
+
+      for (const exp of sampleExpenses) {
+        await Expense.findOneAndUpdate(
+          { trip: sampleTrip._id, title: exp.title },
+          {
+            $set: {
+              trip: sampleTrip._id,
+              user: demoUser._id,
+              ...exp,
+            },
+          },
+          { upsert: true, new: true }
+        );
+      }
+
+      console.log(`Sample itinerary and ${sampleExpenses.length} expenses seeded for trip "${sampleTrip.title}"`);
     }
 
     process.exit(0);

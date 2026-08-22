@@ -7,6 +7,11 @@ export enum TripStatus {
   COMPLETED = 'COMPLETED',
 }
 
+export interface ITripBudget {
+  totalBudget: number;
+  currency: string;
+}
+
 export interface ITrip extends Document {
   user: mongoose.Types.ObjectId;
   title: string;
@@ -17,6 +22,7 @@ export interface ITrip extends Document {
   cities: mongoose.Types.ObjectId[];
   activities: mongoose.Types.ObjectId[];
   status: TripStatus;
+  budget: ITripBudget;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -69,6 +75,21 @@ const tripSchema = new Schema<ITrip>(
       type: String,
       enum: Object.values(TripStatus),
       default: TripStatus.PLANNING,
+    },
+    budget: {
+      totalBudget: {
+        type: Number,
+        default: 0,
+        min: [0, 'Total budget cannot be negative'],
+      },
+      currency: {
+        type: String,
+        trim: true,
+        uppercase: true,
+        default: 'USD',
+        minlength: [3, 'Currency must be a 3-letter code'],
+        maxlength: [3, 'Currency must be a 3-letter code'],
+      },
     },
   },
   {

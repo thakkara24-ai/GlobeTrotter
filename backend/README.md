@@ -48,7 +48,7 @@ Required variables:
 npm run build   # Compile TypeScript
 npm run start   # Run compiled JS
 npm run dev     # Development with hot-reload
-npm run seed    # Seed development cities, activities & sample itinerary
+npm run seed    # Seed development cities, activities, sample itinerary & expenses
 npm test        # Run comprehensive test suite
 ```
 
@@ -96,6 +96,19 @@ npm test        # Run comprehensive test suite
 | PUT    | `/api/trips/:id/stops/:stopId/sections/:sectionId` | Required | Update an itinerary section |
 | DELETE | `/api/trips/:id/stops/:stopId/sections/:sectionId` | Required | Delete an itinerary section |
 
+### Budget, Expenses & Analytics (Phase 4)
+| Method | Endpoint             | Auth     | Description            |
+| ------ | -------------------- | -------- | ---------------------- |
+| GET    | `/api/trips/:tripId/budget` | Required | Get budget summary (spent, remaining, % used, overBudget) |
+| PUT    | `/api/trips/:tripId/budget` | Required | Update trip totalBudget and currency |
+| GET    | `/api/trips/:tripId/budget/categories` | Required | Category-wise expense breakdown with percentages |
+| GET    | `/api/trips/:tripId/budget/daily` | Required | Chronological daily spending totals |
+| POST   | `/api/trips/:tripId/expenses` | Required | Create an expense on a trip |
+| GET    | `/api/trips/:tripId/expenses` | Required | List expenses with pagination & category/date filters |
+| GET    | `/api/trips/:tripId/expenses/:expenseId` | Required | Get single expense details |
+| PUT    | `/api/trips/:tripId/expenses/:expenseId` | Required | Update expense fields |
+| DELETE | `/api/trips/:tripId/expenses/:expenseId` | Required | Delete an expense |
+
 ## Architecture & Data Models
 
 ```
@@ -106,16 +119,18 @@ Routes → Controllers → Services → Models → MongoDB
 - **`User`**: User accounts, credentials (passwordHash select: false), preferences.
 - **`City`**: Geographical destination metadata, text search indexes on name & country.
 - **`Activity`**: Categorized experiences (sightseeing, food, adventure, culture, shopping, nature, entertainment, other) referencing City.
-- **`Trip`**: High-level trip containers referencing User, City[], and Activity[].
+- **`Trip`**: High-level trip containers with budget configuration (`totalBudget`, `currency`).
 - **`TripStop`**: Ordered city stays inside a trip with start/end date bounds.
 - **`ItinerarySection`**: Specific scheduled items (activities, meals, transport) within a stop.
+- **`Expense`**: Individual logged expenses referencing Trip and User with categories (TRANSPORT, ACCOMMODATION, FOOD, ACTIVITY, SHOPPING, ENTERTAINMENT, OTHER).
 
 ### Validation & Relationship Rules
-- **Trip Ownership:** Every trip modification strictly validates that `trip.user` equals `req.user._id`.
+- **Trip Ownership:** Every trip, itinerary, and expense action strictly validates `trip.user === req.user._id`. Non-owners receive `403 Forbidden`.
 - **Date Hierarchy:** `Trip.startDate <= Trip.endDate`, `Stop.startDate <= Stop.endDate`, and `Section.date` must fall within `[Stop.startDate, Stop.endDate]`.
 - **Date Shrinking Safety:** Updating a stop's date range is rejected if existing itinerary sections fall outside the proposed range.
 - **City-Activity Integrity:** When attaching an activity to an itinerary section, the system validates that the activity belongs to the stop's city.
 - **Cascading Deletes:** Deleting a `TripStop` automatically removes all child `ItinerarySection` records.
+- **Expense Integrity:** An expense must belong to the user's trip, have an `amount > 0`, and a valid category.
 
 ## Project Structure
 
@@ -123,19 +138,19 @@ Routes → Controllers → Services → Models → MongoDB
 backend/
 ├── src/
 │   ├── config/        # Database connection & status
-│   ├── controllers/   # Request handlers (auth, city, activity, trip, itinerary)
+│   ├── controllers/   # Request handlers (auth, city, activity, trip, itinerary, expense)
 │   ├── middleware/    # Auth, error, 404
-│   ├── models/        # Mongoose schemas (User, City, Activity, Trip, TripStop, ItinerarySection)
-│   ├── routes/        # Express routes (auth, health, city, activity, trip, itinerary)
-│   ├── scripts/       # Database seed script (cities, activities, sample itinerary)
-│   ├── services/      # Business logic (auth, city, activity, trip, itinerary)
+│   ├── models/        # Mongoose schemas (User, City, Activity, Trip, TripStop, ItinerarySection, Expense)
+│   ├── routes/        # Express routes (auth, health, city, activity, trip, itinerary, expense)
+│   ├── scripts/       # Database seed script (cities, activities, sample itinerary, sample expenses)
+│   ├── services/      # Business logic (auth, city, activity, trip, itinerary, expense)
 │   ├── types/         # TypeScript declarations
 │   ├── utils/         # JWT, password helpers
-│   ├── validators/    # Zod schemas (auth, city, activity, trip, itinerary)
+│   ├── validators/    # Zod schemas (auth, city, activity, trip, itinerary, expense)
 │   ├── app.ts         # Express app setup
 │   └── server.ts      # Entry point
 ├── tests/
-│   └── run-tests.ts   # Automated regression & integration test suite (53 assertions)
+│   └── run-tests.ts   # Automated regression & integration test suite (84 assertions)
 ├── .env.example
 ├── .gitignore
 ├── package.json

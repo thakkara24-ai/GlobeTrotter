@@ -11,6 +11,7 @@ import Activity from '../src/models/Activity';
 import Trip from '../src/models/Trip';
 import TripStop from '../src/models/TripStop';
 import ItinerarySection from '../src/models/ItinerarySection';
+import Expense from '../src/models/Expense';
 
 const PORT = 5002;
 let server: Server;
@@ -79,9 +80,10 @@ async function runTests() {
     server = app.listen(PORT);
     console.log(`\n================ STARTING FULL BACKEND TEST SUITE ================\n`);
 
-    // Clean up previous test users, trips, stops, and sections
+    // Clean up previous test users, trips, stops, sections, and expenses
     await User.deleteMany({ email: { $in: ['p2user1@example.com', 'p2user2@example.com'] } });
     await Trip.deleteMany({ title: { $regex: /Test Trip/i } });
+    await Expense.deleteMany({});
 
     // -------------------------------------------------------------
     // SECTION 1: Phase 1 Regression (Health + Auth)
@@ -184,7 +186,7 @@ async function runTests() {
       'GET /api/cities/:id returns single city'
     );
 
-    // Find a second city (e.g. Paris or Jaipur) for stop testing
+    // Find a second city (e.g. Jaipur) for stop testing
     const jaipurCityRes = await request('/api/cities?search=Jaipur');
     const jaipurCity = jaipurCityRes.data.data.cities.find((c: any) => c.name === 'Jaipur');
     const city2Id = jaipurCity ? jaipurCity._id : citiesRes.data.data.cities[1]._id;
@@ -740,6 +742,343 @@ async function runTests() {
     assert(
       remainingSections.length === 0,
       'Deleting a stop cascades and removes all its associated itinerary sections'
+    );
+
+    // -------------------------------------------------------------
+    // SECTION 6: Phase 4 Budget, Expenses & Analytics Tests
+    // -------------------------------------------------------------
+    console.log('\n--- Section 6: Phase 4 Budget, Expenses & Analytics ---');
+
+    // 54. PUT /api/trips/:tripId/budget without token -> 401
+    const unauthBudget = await request(`/api/trips/${trip1Id}/budget`, {
+      method: 'PUT',
+      body: { totalBudget: 50000, currency: 'INR' },
+    });
+    assert(unauthBudget.status === 401, 'PUT /api/trips/:tripId/budget without token returns 401');
+
+    // 55. PUT /api/trips/:tripId/budget by non-owner -> 403
+    const nonOwnerBudget = await request(`/api/trips/${trip1Id}/budget`, {
+      method: 'PUT',
+      token: token2,
+      body: { totalBudget: 50000, currency: 'INR' },
+    });
+    assert(nonOwnerBudget.status === 403, 'PUT /api/trips/:tripId/budget by non-owner returns 403');
+
+    // 56. Reject negative budget -> 400
+    const negativeBudget = await request(`/api/trips/${trip1Id}/budget`, {
+      method: 'PUT',
+      token: token1,
+      body: { totalBudget: -500, currency: 'INR' },
+    });
+    assert(negativeBudget.status === 400, 'PUT /api/trips/:tripId/budget with negative budget returns 400');
+
+    // 57. Reject invalid currency code -> 400
+    const invalidCurrency = await request(`/api/trips/${trip1Id}/budget`, {
+      method: 'PUT',
+      token: token1,
+      body: { totalBudget: 50000, currency: 'INVALID_CURRENCY' },
+    });
+    assert(invalidCurrency.status === 400, 'PUT /api/trips/:tripId/budget with invalid currency returns 400');
+
+    // 58. Update trip budget successfully by owner -> 200
+    const updateBudgetRes = await request(`/api/trips/${trip1Id}/budget`, {
+      method: 'PUT',
+      token: token1,
+      body: { totalBudget: 50000, currency: 'INR' },
+    });
+    assert(
+      updateBudgetRes.status === 200 &&
+        updateBudgetRes.data.success === true &&
+        updateBudgetRes.data.data.totalBudget === 50000 &&
+        updateBudgetRes.data.data.currency === 'INR' &&
+        updateBudgetRes.data.data.remainingBudget === 50000 &&
+        updateBudgetRes.data.data.totalSpent === 0 &&
+        updateBudgetRes.data.data.overBudget === false,
+      'PUT /api/trips/:tripId/budget updates budget and returns summary'
+    );
+
+    // 59. GET budget summary initially -> 200
+    const getBudgetRes = await request(`/api/trips/${trip1Id}/budget`, { token: token1 });
+    assert(
+      getBudgetRes.status === 200 &&
+        getBudgetRes.data.data.totalBudget === 50000 &&
+        getBudgetRes.data.data.totalSpent === 0 &&
+        getBudgetRes.data.data.percentageUsed === 0 &&
+        getBudgetRes.data.data.expenseCount === 0,
+      'GET /api/trips/:tripId/budget returns zero spending initially'
+    );
+
+    // 60. Create expense without token -> 401
+    const unauthExpense = await request(`/api/trips/${trip1Id}/expenses`, {
+      method: 'POST',
+      body: { title: 'Taxi', amount: 500, category: 'TRANSPORT', date: '2026-10-02' },
+    });
+    assert(unauthExpense.status === 401, 'POST /api/trips/:tripId/expenses without token returns 401');
+
+    // 61. Create expense by non-owner -> 403
+    const nonOwnerExpense = await request(`/api/trips/${trip1Id}/expenses`, {
+      method: 'POST',
+      token: token2,
+      body: { title: 'Hacked Expense', amount: 500, category: 'FOOD', date: '2026-10-02' },
+    });
+    assert(nonOwnerExpense.status === 403, 'POST /api/trips/:tripId/expenses by non-owner returns 403');
+
+    // 62. Create expense with invalid trip -> 404
+    const invalidTripExpense = await request(`/api/trips/6a895d6d57d038761b987eee/expenses`, {
+      method: 'POST',
+      token: token1,
+      body: { title: 'Taxi', amount: 500, category: 'TRANSPORT', date: '2026-10-02' },
+    });
+    assert(invalidTripExpense.status === 404, 'POST /api/trips/:tripId/expenses with non-existent trip returns 404');
+
+    // 63. Create expense with invalid category -> 400
+    const invalidCategoryExpense = await request(`/api/trips/${trip1Id}/expenses`, {
+      method: 'POST',
+      token: token1,
+      body: { title: 'Taxi', amount: 500, category: 'INVALID_CATEGORY', date: '2026-10-02' },
+    });
+    assert(invalidCategoryExpense.status === 400, 'POST /api/trips/:tripId/expenses with invalid category returns 400');
+
+    // 64. Create expense with zero or negative amount -> 400
+    const zeroAmountExpense = await request(`/api/trips/${trip1Id}/expenses`, {
+      method: 'POST',
+      token: token1,
+      body: { title: 'Free meal', amount: 0, category: 'FOOD', date: '2026-10-02' },
+    });
+    assert(zeroAmountExpense.status === 400, 'POST /api/trips/:tripId/expenses with amount = 0 returns 400');
+
+    // 65. Create Expense 1 (TRANSPORT: 12000 INR on 2026-10-02) -> 201
+    const createExp1 = await request(`/api/trips/${trip1Id}/expenses`, {
+      method: 'POST',
+      token: token1,
+      body: {
+        title: 'Train to Jaipur AC Chair Car',
+        amount: 12000,
+        currency: 'INR',
+        category: 'TRANSPORT',
+        date: '2026-10-02',
+        notes: 'Roundtrip booked via IRCTC',
+      },
+    });
+    assert(
+      createExp1.status === 201 &&
+        createExp1.data.success === true &&
+        createExp1.data.data.expense.title === 'Train to Jaipur AC Chair Car' &&
+        createExp1.data.data.expense.amount === 12000 &&
+        createExp1.data.data.expense.category === 'TRANSPORT',
+      'POST /api/trips/:tripId/expenses creates Expense 1 (TRANSPORT)'
+    );
+    const exp1Id = createExp1.data.data.expense._id;
+
+    // 66. Create Expense 2 (FOOD: 8000 INR on 2026-10-02) -> 201
+    const createExp2 = await request(`/api/trips/${trip1Id}/expenses`, {
+      method: 'POST',
+      token: token1,
+      body: {
+        title: 'Fine Dining Rajasthani Dinner',
+        amount: 8000,
+        currency: 'INR',
+        category: 'FOOD',
+        date: '2026-10-02',
+      },
+    });
+    assert(createExp2.status === 201, 'POST /api/trips/:tripId/expenses creates Expense 2 (FOOD)');
+    const exp2Id = createExp2.data.data.expense._id;
+
+    // 67. Create Expense 3 (ACCOMMODATION: 20000 INR on 2026-10-03) -> 201
+    const createExp3 = await request(`/api/trips/${trip1Id}/expenses`, {
+      method: 'POST',
+      token: token1,
+      body: {
+        title: 'Boutique Haveli Resort',
+        amount: 20000,
+        currency: 'INR',
+        category: 'ACCOMMODATION',
+        date: '2026-10-03',
+      },
+    });
+    assert(createExp3.status === 201, 'POST /api/trips/:tripId/expenses creates Expense 3 (ACCOMMODATION)');
+    const exp3Id = createExp3.data.data.expense._id;
+
+    // 68. Create Expense 4 (SHOPPING: 5000 INR on 2026-10-04) -> 201
+    const createExp4 = await request(`/api/trips/${trip1Id}/expenses`, {
+      method: 'POST',
+      token: token1,
+      body: {
+        title: 'Blue Pottery & Handicrafts',
+        amount: 5000,
+        currency: 'INR',
+        category: 'SHOPPING',
+        date: '2026-10-04',
+      },
+    });
+    assert(createExp4.status === 201, 'POST /api/trips/:tripId/expenses creates Expense 4 (SHOPPING)');
+    const exp4Id = createExp4.data.data.expense._id;
+
+    // 69. GET /api/trips/:tripId/expenses lists all expenses with pagination -> 200
+    const listExpensesRes = await request(`/api/trips/${trip1Id}/expenses`, { token: token1 });
+    assert(
+      listExpensesRes.status === 200 &&
+        listExpensesRes.data.data.expenses.length === 4 &&
+        listExpensesRes.data.data.pagination.total === 4,
+      'GET /api/trips/:tripId/expenses returns 4 expenses with pagination metadata'
+    );
+
+    // 70. Filter expenses by category (?category=FOOD) -> 200
+    const filterCatRes = await request(`/api/trips/${trip1Id}/expenses?category=FOOD`, { token: token1 });
+    assert(
+      filterCatRes.status === 200 &&
+        filterCatRes.data.data.expenses.length === 1 &&
+        filterCatRes.data.data.expenses[0].category === 'FOOD',
+      'GET /api/trips/:tripId/expenses?category=FOOD filters correctly'
+    );
+
+    // 71. Filter expenses by date range (?fromDate=2026-10-03&toDate=2026-10-04) -> 200
+    const filterDateRes = await request(
+      `/api/trips/${trip1Id}/expenses?fromDate=2026-10-03&toDate=2026-10-04`,
+      { token: token1 }
+    );
+    assert(
+      filterDateRes.status === 200 &&
+        filterDateRes.data.data.expenses.length === 2 &&
+        filterDateRes.data.data.expenses.every((e: any) => e.date.startsWith('2026-10-03') || e.date.startsWith('2026-10-04')),
+      'GET /api/trips/:tripId/expenses with fromDate & toDate filters correctly'
+    );
+
+    // 72. Pagination on expenses (?page=1&limit=2) -> 200
+    const pageExpensesRes = await request(`/api/trips/${trip1Id}/expenses?page=1&limit=2`, { token: token1 });
+    assert(
+      pageExpensesRes.status === 200 &&
+        pageExpensesRes.data.data.expenses.length === 2 &&
+        pageExpensesRes.data.data.pagination.page === 1 &&
+        pageExpensesRes.data.data.pagination.limit === 2 &&
+        pageExpensesRes.data.data.pagination.pages === 2,
+      'GET /api/trips/:tripId/expenses pagination returns 2 items per page with 2 pages total'
+    );
+
+    // 73. Get single expense by ID by owner -> 200
+    const getExp1Res = await request(`/api/trips/${trip1Id}/expenses/${exp1Id}`, { token: token1 });
+    assert(
+      getExp1Res.status === 200 && getExp1Res.data.data.expense.title === 'Train to Jaipur AC Chair Car',
+      'GET /api/trips/:tripId/expenses/:expenseId returns single expense'
+    );
+
+    // 74. Get single expense by non-owner -> 403
+    const nonOwnerGetExp = await request(`/api/trips/${trip1Id}/expenses/${exp1Id}`, { token: token2 });
+    assert(nonOwnerGetExp.status === 403, 'GET /api/trips/:tripId/expenses/:expenseId by non-owner returns 403');
+
+    // 75. Update expense by owner -> 200
+    const updateExpRes = await request(`/api/trips/${trip1Id}/expenses/${exp1Id}`, {
+      method: 'PUT',
+      token: token1,
+      body: {
+        amount: 14000,
+        notes: 'Executive Class upgrade',
+      },
+    });
+    assert(
+      updateExpRes.status === 200 &&
+        updateExpRes.data.data.expense.amount === 14000 &&
+        updateExpRes.data.data.expense.notes === 'Executive Class upgrade',
+      'PUT /api/trips/:tripId/expenses/:expenseId by owner updates expense'
+    );
+
+    // 76. Update expense by non-owner -> 403
+    const nonOwnerUpdateExp = await request(`/api/trips/${trip1Id}/expenses/${exp1Id}`, {
+      method: 'PUT',
+      token: token2,
+      body: { amount: 1000 },
+    });
+    assert(nonOwnerUpdateExp.status === 403, 'PUT /api/trips/:tripId/expenses/:expenseId by non-owner returns 403');
+
+    // 77. Delete expense by non-owner -> 403
+    const nonOwnerDeleteExp = await request(`/api/trips/${trip1Id}/expenses/${exp4Id}`, {
+      method: 'DELETE',
+      token: token2,
+    });
+    assert(nonOwnerDeleteExp.status === 403, 'DELETE /api/trips/:tripId/expenses/:expenseId by non-owner returns 403');
+
+    // 78. Delete expense by owner -> 200
+    const deleteExpRes = await request(`/api/trips/${trip1Id}/expenses/${exp4Id}`, {
+      method: 'DELETE',
+      token: token1,
+    });
+    assert(deleteExpRes.status === 200, 'DELETE /api/trips/:tripId/expenses/:expenseId by owner deletes expense');
+
+    // 79. Get deleted expense -> 404
+    const getDeletedExp = await request(`/api/trips/${trip1Id}/expenses/${exp4Id}`, { token: token1 });
+    assert(getDeletedExp.status === 404, 'GET /api/trips/:tripId/expenses/:expenseId after delete returns 404');
+
+    // At this point, active expenses:
+    // Exp 1: TRANSPORT = 14000
+    // Exp 2: FOOD = 8000
+    // Exp 3: ACCOMMODATION = 20000
+    // Total spent = 42000. Total budget = 50000.
+
+    // 80. Category Analytics (GET /api/trips/:tripId/budget/categories) -> 200
+    const catAnalyticsRes = await request(`/api/trips/${trip1Id}/budget/categories`, { token: token1 });
+    assert(
+      catAnalyticsRes.status === 200 &&
+        catAnalyticsRes.data.data.categories.length === 3 &&
+        catAnalyticsRes.data.data.categories[0].category === 'ACCOMMODATION' &&
+        catAnalyticsRes.data.data.categories[0].amount === 20000 &&
+        catAnalyticsRes.data.data.categories[0].percentage > 0,
+      'GET /api/trips/:tripId/budget/categories aggregates expenses and calculates percentages'
+    );
+
+    // 81. Daily Analytics (GET /api/trips/:tripId/budget/daily) -> 200
+    const dailyAnalyticsRes = await request(`/api/trips/${trip1Id}/budget/daily`, { token: token1 });
+    assert(
+      dailyAnalyticsRes.status === 200 &&
+        dailyAnalyticsRes.data.data.daily.length === 2 &&
+        dailyAnalyticsRes.data.data.daily[0].date === '2026-10-02' &&
+        dailyAnalyticsRes.data.data.daily[0].amount === 22000 && // 14000 + 8000
+        dailyAnalyticsRes.data.data.daily[1].date === '2026-10-03' &&
+        dailyAnalyticsRes.data.data.daily[1].amount === 20000,
+      'GET /api/trips/:tripId/budget/daily groups daily spending and sorts chronologically'
+    );
+
+    // 82. Budget Summary with accurate calculations -> 200
+    // Total budget = 50000, Total spent = 42000 (84%), Remaining = 8000, overBudget = false
+    const budgetSummaryRes = await request(`/api/trips/${trip1Id}/budget`, { token: token1 });
+    assert(
+      budgetSummaryRes.status === 200 &&
+        budgetSummaryRes.data.data.totalBudget === 50000 &&
+        budgetSummaryRes.data.data.totalSpent === 42000 &&
+        budgetSummaryRes.data.data.remainingBudget === 8000 &&
+        budgetSummaryRes.data.data.percentageUsed === 84 &&
+        budgetSummaryRes.data.data.overBudget === false &&
+        budgetSummaryRes.data.data.expenseCount === 3,
+      'GET /api/trips/:tripId/budget returns accurate totalSpent, remainingBudget, and percentageUsed'
+    );
+
+    // 83. Over-Budget Detection: Update budget to 40000 (less than 42000 spent) -> 200
+    const overBudgetUpdate = await request(`/api/trips/${trip1Id}/budget`, {
+      method: 'PUT',
+      token: token1,
+      body: { totalBudget: 40000, currency: 'INR' },
+    });
+    assert(
+      overBudgetUpdate.status === 200 &&
+        overBudgetUpdate.data.data.overBudget === true &&
+        overBudgetUpdate.data.data.remainingBudget === -2000 &&
+        overBudgetUpdate.data.data.percentageUsed === 105,
+      'Over-budget detected when totalSpent exceeds totalBudget (overBudget: true, remaining: negative, %: > 100)'
+    );
+
+    // 84. Zero-Budget Handling: Update budget to 0 -> 200, handles percentage without NaN/Infinity
+    const zeroBudgetUpdate = await request(`/api/trips/${trip1Id}/budget`, {
+      method: 'PUT',
+      token: token1,
+      body: { totalBudget: 0, currency: 'INR' },
+    });
+    assert(
+      zeroBudgetUpdate.status === 200 &&
+        zeroBudgetUpdate.data.data.totalBudget === 0 &&
+        !isNaN(zeroBudgetUpdate.data.data.percentageUsed) &&
+        isFinite(zeroBudgetUpdate.data.data.percentageUsed) &&
+        zeroBudgetUpdate.data.data.overBudget === true,
+      'Zero-budget configuration handled safely without NaN or Infinity'
     );
 
     console.log(`\n============================================================`);
