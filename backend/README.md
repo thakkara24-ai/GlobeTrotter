@@ -48,34 +48,60 @@ Required variables:
 npm run build   # Compile TypeScript
 npm run start   # Run compiled JS
 npm run dev     # Development with hot-reload
+npm run seed    # Seed development cities & activities
+npm test        # Run comprehensive test suite
 ```
 
-## API Endpoints (Phase 1)
+## API Endpoints
 
+### Authentication & Health
 | Method | Endpoint             | Auth     | Description            |
 | ------ | -------------------- | -------- | ---------------------- |
-| GET    | `/api/health`        | Public   | Health check           |
+| GET    | `/api/health`        | Public   | Health check & DB state|
 | POST   | `/api/auth/register` | Public   | Register a new user    |
 | POST   | `/api/auth/login`    | Public   | Login                  |
 | GET    | `/api/auth/me`       | Required | Get current user info  |
+
+### Cities
+| Method | Endpoint             | Auth     | Description            |
+| ------ | -------------------- | -------- | ---------------------- |
+| GET    | `/api/cities`        | Public   | List cities (search, country, tags, pagination) |
+| GET    | `/api/cities/:id`    | Public   | Get single city details|
+
+### Activities
+| Method | Endpoint             | Auth     | Description            |
+| ------ | -------------------- | -------- | ---------------------- |
+| GET    | `/api/activities`    | Public   | List activities (city, category, search, pagination) |
+| GET    | `/api/activities/:id`| Public   | Get single activity with city populated |
+
+### Trips (User-Owned)
+| Method | Endpoint             | Auth     | Description            |
+| ------ | -------------------- | -------- | ---------------------- |
+| POST   | `/api/trips`         | Required | Create a new trip      |
+| GET    | `/api/trips`         | Required | List authenticated user trips (paginated) |
+| GET    | `/api/trips/:id`     | Required | Get single trip (ownership verified, populated) |
+| PUT    | `/api/trips/:id`     | Required | Update trip (ownership verified) |
+| DELETE | `/api/trips/:id`     | Required | Delete trip (ownership verified) |
 
 ## Project Structure
 
 ```
 backend/
 ├── src/
-│   ├── config/        # Database connection
-│   ├── controllers/   # Request handlers
-│   ├── middleware/     # Auth, error, 404
-│   ├── models/        # Mongoose schemas
-│   ├── routes/        # Express routes
-│   ├── services/      # Business logic
+│   ├── config/        # Database connection & status
+│   ├── controllers/   # Request handlers (auth, city, activity, trip)
+│   ├── middleware/    # Auth, error, 404
+│   ├── models/        # Mongoose schemas (User, City, Activity, Trip)
+│   ├── routes/        # Express routes (auth, health, city, activity, trip)
+│   ├── scripts/       # Database seed script
+│   ├── services/      # Business logic (auth, city, activity, trip)
 │   ├── types/         # TypeScript declarations
 │   ├── utils/         # JWT, password helpers
-│   ├── validators/    # Zod schemas
+│   ├── validators/    # Zod schemas (auth, city, activity, trip)
 │   ├── app.ts         # Express app setup
 │   └── server.ts      # Entry point
 ├── tests/
+│   └── run-tests.ts   # Automated regression & integration test suite
 ├── .env.example
 ├── .gitignore
 ├── package.json
