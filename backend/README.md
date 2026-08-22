@@ -98,15 +98,17 @@ npm test        # Run comprehensive test suite
 | PUT    | `/api/trips/:id/stops/:stopId/sections/:sectionId` | Required | Update an itinerary section |
 | DELETE | `/api/trips/:id/stops/:stopId/sections/:sectionId` | Required | Delete an itinerary section |
 
-### Budget, Expenses & Analytics (Phase 4)
+### Budget, Expenses & Smart Recommendation (Phase 4 & Phase 7)
 | Method | Endpoint             | Auth     | Description            |
 | ------ | -------------------- | -------- | ---------------------- |
+| GET    | `/api/trips/:tripId/budget/recommendation` | Required | Smart rule-based & data-driven budget recommendation (`?style=budget\|standard\|comfortable\|premium&travelers=2`) |
 | GET    | `/api/trips/:tripId/budget` | Required | Get budget summary (spent, remaining, % used, overBudget) |
 | PUT    | `/api/trips/:tripId/budget` | Required | Update trip totalBudget and currency |
 | GET    | `/api/trips/:tripId/budget/categories` | Required | Category-wise expense breakdown with percentages |
 | GET    | `/api/trips/:tripId/budget/daily` | Required | Chronological daily spending totals |
 | POST   | `/api/trips/:tripId/expenses` | Required | Create an expense on a trip |
 | GET    | `/api/trips/:tripId/expenses` | Required | List expenses with pagination & category/date filters |
+
 ### Trip Collaboration & Permissions (Phase 6)
 | Method | Endpoint             | Auth     | Description            |
 | ------ | -------------------- | -------- | ---------------------- |
@@ -156,20 +158,37 @@ Routes → Controllers → Services → Models → MongoDB
 - MongoDB **`2dsphere`** indexes are applied on `City.location` and `Activity.location`.
 - Distance queries use native MongoDB `$geoNear` aggregation pipelines for maximum performance.
 
+### Smart Budget Recommendation Engine (Phase 7)
+- **Deterministic & Rule-Based:** Uses multi-variable estimation without external AI APIs or paid services.
+- **Key Factors:**
+  - **Trip Duration:** Exact day count between start and end dates (minimum 1 day).
+  - **Travelers:** Scales accommodation (assumes 2 people/room), food, local transit, activities, and shopping per person.
+  - **Destination Transit:** Automatically computes inter-city transfer costs when trips span multiple destination cities.
+  - **Itinerary Activities:** Aggregates planned activity costs directly from `ItinerarySection` and `Activity` records to avoid double-counting.
+  - **Travel Styles:**
+    - `budget`: 0.75x multiplier
+    - `standard`: 1.0x baseline multiplier (default)
+    - `comfortable`: 1.4x multiplier
+    - `premium`: 2.0x multiplier
+  - **Historical Spending Patterns:** When a user has >= 3 past expenses across other trips, the engine incorporates weighted average daily spending for food and transport to customize recommendations.
+  - **Existing Expenses & Over-Budget:** Accounts for `alreadySpent` and computes `remainingRecommendedBudget` (`max(0, recommended - alreadySpent)`). Flags `overBudget: true` if spent exceeds recommendation.
+  - **Confidence Levels:**
+    - `HIGH`: Historical spending data available + planned activities/stops in itinerary.
+    - `MEDIUM`: Either historical data available OR detailed itinerary with planned stops/activities.
+    - `LOW`: Baseline estimation without prior user spending history.
+
 ### Models
 - **`User`**: User accounts, credentials (passwordHash select: false), preferences.
 - **`TripCollaborator`**: User-trip collaboration relationships with role enum (`VIEWER`, `EDITOR`) and compound unique index.
-- **`Trip`**: High-level trip containers with budget configuration (`totalBudget`, `currency`) and public share configuration (`publicShareEnabled`, `publicShareToken`).
+- **`Trip`**: High-level trip containers with budget configuration (`totalBudget`, `currency`), traveler count (`travelers`), and public share configuration (`publicShareEnabled`, `publicShareToken`).
 - **`City`**: Geographical destination metadata, GeoJSON `location`, 2dsphere index, text search indexes on name & country.
 - **`Activity`**: Categorized experiences referencing City with GeoJSON `location` and 2dsphere index.
-- **`Activity`**: Categorized experiences referencing City with GeoJSON `location` and 2dsphere index.
-- **`Trip`**: High-level trip containers with budget configuration (`totalBudget`, `currency`).
 - **`TripStop`**: Ordered city stays inside a trip with start/end date bounds.
 - **`ItinerarySection`**: Specific scheduled items (activities, meals, transport) within a stop.
 - **`Expense`**: Individual logged expenses referencing Trip and User with categories.
 
 ### Validation & Relationship Rules
-- **Trip Ownership:** Every trip, itinerary, map, and expense action strictly validates `trip.user === req.user._id`. Non-owners receive `403 Forbidden`.
+- **Trip Ownership & Collaboration:** Every trip, itinerary, map, and expense action strictly validates effective role (`OWNER`, `EDITOR`, `VIEWER`). Non-collaborators receive `403 Forbidden`.
 - **Date Hierarchy:** `Trip.startDate <= Trip.endDate`, `Stop.startDate <= Stop.endDate`, and `Section.date` must fall within `[Stop.startDate, Stop.endDate]`.
 - **Date Shrinking Safety:** Updating a stop's date range is rejected if existing itinerary sections fall outside the proposed range.
 - **City-Activity Integrity:** When attaching an activity to an itinerary section, the system validates that the activity belongs to the stop's city.

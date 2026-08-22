@@ -17,6 +17,7 @@ class TripService {
       cities: data.cities,
       activities: data.activities,
       status: data.status,
+      travelers: data.travelers || 1,
     });
 
     return trip.populate([
@@ -114,6 +115,7 @@ class TripService {
     if (data.cities !== undefined) updateData.cities = data.cities;
     if (data.activities !== undefined) updateData.activities = data.activities;
     if (data.status !== undefined) updateData.status = data.status;
+    if (data.travelers !== undefined) updateData.travelers = data.travelers;
 
     // Cross-validate dates if partially updated
     const finalStartDate = updateData.startDate || trip.startDate;

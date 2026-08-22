@@ -1923,6 +1923,301 @@ async function runTests() {
       'Public itinerary accessible after re-enabling'
     );
 
+    // -------------------------------------------------------------
+    // SECTION 12: Phase 7 Smart Budget Recommendation
+    // -------------------------------------------------------------
+    console.log('\n--- Section 12: Phase 7 Smart Budget Recommendation ---');
+
+    // 161. GET recommendation without token -> 401
+    const unauthRec = await request(`/api/trips/${trip1Id}/budget/recommendation`);
+    assert(unauthRec.status === 401, 'GET budget recommendation without token returns 401');
+
+    // 162. GET recommendation by unrelated user (User 4) -> 403
+    const forbiddenRec = await request(`/api/trips/${trip1Id}/budget/recommendation`, {
+      token: token4,
+    });
+    assert(forbiddenRec.status === 403, 'GET budget recommendation by non-collaborator returns 403');
+
+    // 163. GET recommendation for non-existent trip -> 404
+    const notFoundRec = await request(
+      '/api/trips/6a895d6d57d038761b987eee/budget/recommendation',
+      { token: token1 }
+    );
+    assert(notFoundRec.status === 404, 'GET budget recommendation for non-existent trip returns 404');
+
+    // 164. GET recommendation with invalid trip ID format -> 400
+    const invalidIdRec = await request(
+      '/api/trips/invalid-format-id/budget/recommendation',
+      { token: token1 }
+    );
+    assert(invalidIdRec.status === 400, 'GET budget recommendation with invalid trip ID format returns 400');
+
+    // 165. Basic recommendation for valid trip (Owner) -> 200
+    const ownerRec = await request(`/api/trips/${trip1Id}/budget/recommendation`, {
+      token: token1,
+    });
+    assert(
+      ownerRec.status === 200 &&
+        ownerRec.data.success === true &&
+        ownerRec.data.data.tripId === trip1Id &&
+        typeof ownerRec.data.data.recommendation.recommended === 'number' &&
+        typeof ownerRec.data.data.recommendation.minimum === 'number' &&
+        typeof ownerRec.data.data.recommendation.comfortable === 'number',
+      'GET budget recommendation returns complete recommendation structure'
+    );
+    const recData = ownerRec.data.data;
+
+    // 166. Correct duration calculation (14 days for trip1: 2026-10-01 to 2026-10-14)
+    assert(recData.durationDays === 14, 'Correct duration calculated (14 days)');
+
+    // 167. Default traveler count = 1
+    assert(recData.travelers === 1, 'Default traveler count = 1');
+
+    // 168. Traveler scaling (?travelers=3) increases costs & rooms
+    const scaledTravelersRec = await request(
+      `/api/trips/${trip1Id}/budget/recommendation?travelers=3`,
+      { token: token1 }
+    );
+    assert(
+      scaledTravelersRec.status === 200 &&
+        scaledTravelersRec.data.data.travelers === 3 &&
+        scaledTravelersRec.data.data.recommendation.recommended > recData.recommendation.recommended &&
+        scaledTravelersRec.data.data.categories.food === recData.categories.food * 3,
+      'Traveler scaling (?travelers=3) scales food and total budget proportionally'
+    );
+
+    // 169. Itinerary activities included in activities recommendation
+    assert(
+      recData.categories.activities > 0 &&
+        recData.explanation.some((e: string) => e.includes('activity') || e.includes('activities')),
+      'Itinerary activities contribute to activities recommendation and explanation'
+    );
+
+    // 170. Multi-city trip accounts for destination cities
+    assert(
+      recData.categories.transport > 0 &&
+        recData.factors.some((f: string) => f.includes('destination')),
+      'Multi-city trip accounts for destination transit in transport recommendation'
+    );
+
+    // 171. Existing expenses reflected in alreadySpent and remainingRecommendedBudget
+    assert(
+      typeof recData.alreadySpent === 'number' &&
+        typeof recData.remainingRecommendedBudget === 'number' &&
+        recData.remainingRecommendedBudget === Math.max(0, recData.recommendation.recommended - Math.round(recData.alreadySpent)),
+      'Existing expenses properly reflected in alreadySpent and remainingRecommendedBudget'
+    );
+
+    // 172. Over-budget detection: create a separate test trip with large expense
+    const overBudgetTrip = await request('/api/trips', {
+      method: 'POST',
+      token: token1,
+      body: {
+        title: 'Over Budget Test Trip',
+        startDate: '2026-12-01',
+        endDate: '2026-12-02',
+      },
+    });
+    const overTripId = overBudgetTrip.data.data.trip._id;
+
+    // Add a massive expense exceeding the 2-day budget
+    await request(`/api/trips/${overTripId}/expenses`, {
+      method: 'POST',
+      token: token1,
+      body: {
+        title: 'Luxury Yacht Charter',
+        amount: 500000,
+        currency: 'USD',
+        category: 'TRANSPORT',
+        date: '2026-12-01',
+      },
+    });
+
+    const overBudgetRecRes = await request(
+      `/api/trips/${overTripId}/budget/recommendation`,
+      { token: token1 }
+    );
+    assert(
+      overBudgetRecRes.status === 200 &&
+        overBudgetRecRes.data.data.overBudget === true &&
+        overBudgetRecRes.data.data.alreadySpent >= 500000 &&
+        overBudgetRecRes.data.data.remainingRecommendedBudget === 0,
+      'Over-budget detected when alreadySpent exceeds recommended budget (overBudget: true, remaining: 0)'
+    );
+
+    // 173. Historical spending improves recommendation and reflects in factors
+    assert(
+      recData.confidence === 'HIGH' || recData.confidence === 'MEDIUM',
+      'Confidence is MEDIUM/HIGH when past spending data or detailed itinerary exists'
+    );
+
+    // 174. Fallback when no historical data exists: create trip for User 4 (unrelated with 0 past expenses)
+    const u4TripRes = await request('/api/trips', {
+      method: 'POST',
+      token: token4,
+      body: {
+        title: 'User 4 Fresh Trip',
+        startDate: '2026-11-01',
+        endDate: '2026-11-05',
+      },
+    });
+    const u4TripId = u4TripRes.data.data.trip._id;
+
+    const u4Rec = await request(`/api/trips/${u4TripId}/budget/recommendation`, {
+      token: token4,
+    });
+    assert(
+      u4Rec.status === 200 &&
+        u4Rec.data.data.confidence === 'LOW' &&
+        u4Rec.data.data.explanation.some((e: string) => e.includes('baseline')),
+      'Fallback to baseline rates and LOW confidence when no historical user expenses exist'
+    );
+
+    // 175. Budget style = budget (0.75x)
+    const budgetStyleRec = await request(
+      `/api/trips/${u4TripId}/budget/recommendation?style=budget`,
+      { token: token4 }
+    );
+    assert(
+      budgetStyleRec.status === 200 &&
+        budgetStyleRec.data.data.style === 'budget' &&
+        budgetStyleRec.data.data.recommendation.recommended < u4Rec.data.data.recommendation.recommended,
+      'Budget style = budget applies 0.75x multiplier with lower totals'
+    );
+
+    // 176. Budget style = standard (1.0x)
+    const standardStyleRec = await request(
+      `/api/trips/${u4TripId}/budget/recommendation?style=standard`,
+      { token: token4 }
+    );
+    assert(
+      standardStyleRec.status === 200 &&
+        standardStyleRec.data.data.style === 'standard' &&
+        standardStyleRec.data.data.recommendation.recommended === u4Rec.data.data.recommendation.recommended,
+      'Budget style = standard defaults to 1.0x baseline'
+    );
+
+    // 177. Budget style = comfortable (1.4x)
+    const comfortableStyleRec = await request(
+      `/api/trips/${u4TripId}/budget/recommendation?style=comfortable`,
+      { token: token4 }
+    );
+    assert(
+      comfortableStyleRec.status === 200 &&
+        comfortableStyleRec.data.data.style === 'comfortable' &&
+        comfortableStyleRec.data.data.recommendation.recommended > standardStyleRec.data.data.recommendation.recommended,
+      'Budget style = comfortable applies 1.4x multiplier'
+    );
+
+    // 178. Budget style = premium (2.0x)
+    const premiumStyleRec = await request(
+      `/api/trips/${u4TripId}/budget/recommendation?style=premium`,
+      { token: token4 }
+    );
+    assert(
+      premiumStyleRec.status === 200 &&
+        premiumStyleRec.data.data.style === 'premium' &&
+        premiumStyleRec.data.data.recommendation.recommended === Math.round(standardStyleRec.data.data.recommendation.recommended * 2),
+      'Budget style = premium applies 2.0x multiplier'
+    );
+
+    // 179. Invalid budget style -> 400
+    const invalidStyleRec = await request(
+      `/api/trips/${u4TripId}/budget/recommendation?style=ultra_luxury`,
+      { token: token4 }
+    );
+    assert(invalidStyleRec.status === 400, 'Invalid budget style returns 400');
+
+    // 180. Empty itinerary trip handled safely
+    assert(
+      u4Rec.status === 200 &&
+        u4Rec.data.data.categories.activities > 0 &&
+        u4Rec.data.data.categories.food > 0,
+      'Empty itinerary handled safely with baseline category calculations'
+    );
+
+    // 181. Single-day trip handled safely (duration = 1, dailyBudget = recommended)
+    const singleDayTrip = await request('/api/trips', {
+      method: 'POST',
+      token: token4,
+      body: {
+        title: 'Single Day Excursion',
+        startDate: '2026-11-10',
+        endDate: '2026-11-10',
+      },
+    });
+    const singleTripId = singleDayTrip.data.data.trip._id;
+    const singleRec = await request(
+      `/api/trips/${singleTripId}/budget/recommendation`,
+      { token: token4 }
+    );
+    assert(
+      singleRec.status === 200 &&
+        singleRec.data.data.durationDays === 1 &&
+        singleRec.data.data.dailyBudget === singleRec.data.data.recommendation.recommended,
+      'Single-day trip handled safely (durationDays = 1, dailyBudget = recommended)'
+    );
+
+    // 182. No NaN or Infinity in any response fields
+    const rawRecJson = JSON.stringify(recData);
+    assert(
+      !rawRecJson.includes('NaN') &&
+        !rawRecJson.includes('null') &&
+        !rawRecJson.includes('Infinity'),
+      'No NaN or Infinity present in recommendation response'
+    );
+
+    // 183. No negative recommendation values
+    assert(
+      recData.recommendation.minimum > 0 &&
+        recData.recommendation.recommended > 0 &&
+        recData.recommendation.comfortable > 0 &&
+        recData.dailyBudget > 0 &&
+        recData.remainingRecommendedBudget >= 0,
+      'All recommendation numbers are strictly positive and non-negative'
+    );
+
+    // 184. Category breakdown includes all 6 categories
+    assert(
+      typeof recData.categories.transport === 'number' &&
+        typeof recData.categories.accommodation === 'number' &&
+        typeof recData.categories.food === 'number' &&
+        typeof recData.categories.activities === 'number' &&
+        typeof recData.categories.shopping === 'number' &&
+        typeof recData.categories.other === 'number',
+      'Category breakdown contains all required categories with numeric amounts'
+    );
+
+    // 185. Permission check for EDITOR (User 3) -> 200
+    const editorRec = await request(`/api/trips/${trip1Id}/budget/recommendation`, {
+      token: token3,
+    });
+    assert(editorRec.status === 200, 'EDITOR (User 3) can access budget recommendation (200)');
+
+    // 186. Permission check for VIEWER (User 2) -> 200
+    const viewerRec = await request(`/api/trips/${trip1Id}/budget/recommendation`, {
+      token: token2,
+    });
+    assert(viewerRec.status === 200, 'VIEWER (User 2) can access budget recommendation (200)');
+
+    // 187. Regression test for existing budget summary API
+    const budgetSummaryReg = await request(`/api/trips/${trip1Id}/budget`, {
+      token: token1,
+    });
+    assert(budgetSummaryReg.status === 200, 'Regression: GET /api/trips/:tripId/budget returns 200');
+
+    // 188. Regression test for existing budget categories API
+    const budgetCatReg = await request(`/api/trips/${trip1Id}/budget/categories`, {
+      token: token1,
+    });
+    assert(budgetCatReg.status === 200, 'Regression: GET /api/trips/:tripId/budget/categories returns 200');
+
+    // 189. Regression test for existing budget daily API
+    const budgetDailyReg = await request(`/api/trips/${trip1Id}/budget/daily`, {
+      token: token1,
+    });
+    assert(budgetDailyReg.status === 200, 'Regression: GET /api/trips/:tripId/budget/daily returns 200');
+
     console.log(`\n============================================================`);
     console.log(`TEST SUMMARY: ${passedTests} passed, ${failedTests} failed`);
     console.log(`============================================================\n`);

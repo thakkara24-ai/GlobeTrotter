@@ -22,6 +22,7 @@ export interface ITrip extends Document {
   cities: mongoose.Types.ObjectId[];
   activities: mongoose.Types.ObjectId[];
   status: TripStatus;
+  travelers: number;
   budget: ITripBudget;
   publicShareEnabled: boolean;
   publicShareToken?: string | null;
@@ -77,6 +78,11 @@ const tripSchema = new Schema<ITrip>(
       type: String,
       enum: Object.values(TripStatus),
       default: TripStatus.PLANNING,
+    },
+    travelers: {
+      type: Number,
+      default: 1,
+      min: [1, 'Travelers must be at least 1'],
     },
     budget: {
       totalBudget: {

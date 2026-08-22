@@ -1,11 +1,13 @@
 import { Request, Response, NextFunction } from 'express';
 import expenseService from '../services/expense.service';
+import budgetRecommendationService from '../services/budgetRecommendation.service';
 import {
   updateBudgetSchema,
   createExpenseSchema,
   updateExpenseSchema,
   expenseQuerySchema,
 } from '../validators/expense.validator';
+import { budgetRecommendationQuerySchema } from '../validators/budgetRecommendation.validator';
 
 /**
  * PUT /api/trips/:tripId/budget
@@ -223,6 +225,35 @@ export const deleteExpense = async (
     res.json({
       success: true,
       data: { message: 'Expense deleted successfully' },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/trips/:tripId/budget/recommendation
+ */
+export const getBudgetRecommendation = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const userId = req.user!._id.toString();
+    const tripId = req.params.tripId as string;
+    const validatedQuery = budgetRecommendationQuerySchema.parse(req.query);
+
+    const recommendation =
+      await budgetRecommendationService.getBudgetRecommendation(
+        tripId,
+        userId,
+        validatedQuery
+      );
+
+    res.json({
+      success: true,
+      data: recommendation,
     });
   } catch (error) {
     next(error);

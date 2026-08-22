@@ -5,6 +5,7 @@ import {
   getBudgetSummary,
   getCategoryAnalytics,
   getDailyAnalytics,
+  getBudgetRecommendation,
   createExpense,
   getExpenses,
   getExpenseById,
@@ -20,6 +21,7 @@ router.use(authenticate);
 /**
  * Budget & Analytics Routes
  */
+router.get('/:tripId/budget/recommendation', getBudgetRecommendation);
 router.get('/:tripId/budget/categories', getCategoryAnalytics);
 router.get('/:tripId/budget/daily', getDailyAnalytics);
 router.get('/:tripId/budget', getBudgetSummary);

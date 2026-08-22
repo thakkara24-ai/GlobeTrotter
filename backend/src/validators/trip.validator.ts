@@ -26,6 +26,12 @@ export const createTripSchema = z
       .enum(['PLANNING', 'UPCOMING', 'ONGOING', 'COMPLETED'])
       .optional()
       .default('PLANNING'),
+    travelers: z
+      .number()
+      .int('Travelers must be an integer')
+      .min(1, 'Travelers must be at least 1')
+      .optional()
+      .default(1),
   })
   .refine(
     (data) => {
@@ -64,6 +70,11 @@ export const updateTripSchema = z
     cities: z.array(z.string()).optional(),
     activities: z.array(z.string()).optional(),
     status: z.enum(['PLANNING', 'UPCOMING', 'ONGOING', 'COMPLETED']).optional(),
+    travelers: z
+      .number()
+      .int('Travelers must be an integer')
+      .min(1, 'Travelers must be at least 1')
+      .optional(),
   })
   .refine(
     (data) => {
