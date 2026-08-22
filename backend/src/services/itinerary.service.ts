@@ -7,6 +7,8 @@ import Activity from '../models/Activity';
 import collaboratorService, {
   EffectiveRole,
 } from './collaborator.service';
+import notificationService from './notification.service';
+import { NotificationType } from '../models/Notification';
 import {
   CreateStopInput,
   UpdateStopInput,
@@ -192,6 +194,18 @@ class ItineraryService {
       'cityId',
       'name country countryCode description image latitude longitude timezone tags'
     );
+
+    const trip = await Trip.findById(tripId);
+    if (trip && trip.user.toString() !== userId) {
+      await notificationService.createNotification({
+        recipient: trip.user,
+        actor: userId,
+        type: NotificationType.ITINERARY_UPDATED,
+        title: 'Itinerary Updated',
+        message: `An itinerary stop was added to "${trip.title}"`,
+        trip: tripId,
+      });
+    }
 
     return formatStopObject(populated);
   }
@@ -406,6 +420,18 @@ class ItineraryService {
       'activityId',
       'name description category estimatedCost currency durationMinutes image tags'
     );
+
+    const trip = await Trip.findById(tripId);
+    if (trip && trip.user.toString() !== userId) {
+      await notificationService.createNotification({
+        recipient: trip.user,
+        actor: userId,
+        type: NotificationType.ITINERARY_UPDATED,
+        title: 'Itinerary Updated',
+        message: `A scheduled section was added to "${trip.title}"`,
+        trip: tripId,
+      });
+    }
 
     return formatSectionObject(populated);
   }

@@ -6,6 +6,8 @@ import City from '../models/City';
 import Trip from '../models/Trip';
 import User from '../models/User';
 import collaboratorService from './collaborator.service';
+import notificationService from './notification.service';
+import { NotificationType } from '../models/Notification';
 import {
   CreatePostInput,
   UpdatePostInput,
@@ -321,6 +323,21 @@ class CommunityService {
         { $inc: { likeCount: 1 } },
         { new: true }
       );
+
+      // Notify post author if liked by another user
+      if (post.author.toString() !== userId) {
+        const actor = await User.findById(userId);
+        const actorName = actor?.username ? `@${actor.username}` : actor?.name || 'Someone';
+        await notificationService.createNotification({
+          recipient: post.author,
+          actor: userId,
+          type: NotificationType.POST_LIKED,
+          title: 'New Like',
+          message: `${actorName} liked your post`,
+          post: postId,
+        });
+      }
+
       return { liked: true, likeCount: updated?.likeCount || post.likeCount + 1 };
     } catch (err: any) {
       // If concurrent request triggered unique constraint
@@ -405,6 +422,21 @@ class CommunityService {
     await CommunityPost.findByIdAndUpdate(postId, {
       $inc: { commentCount: 1 },
     });
+
+    // Notify post author if commented by another user
+    if (post.author.toString() !== userId) {
+      const actor = await User.findById(userId);
+      const actorName = actor?.username ? `@${actor.username}` : actor?.name || 'Someone';
+      await notificationService.createNotification({
+        recipient: post.author,
+        actor: userId,
+        type: NotificationType.POST_COMMENTED,
+        title: 'New Comment',
+        message: `${actorName} commented on your post`,
+        post: postId,
+        metadata: { commentId: comment._id },
+      });
+    }
 
     return comment.populate('author', '_id name username avatar');
   }

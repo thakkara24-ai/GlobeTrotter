@@ -2672,6 +2672,308 @@ async function runTests() {
       'Community feed does not leak passwordHash or private user email'
     );
 
+    // -------------------------------------------------------------
+    // SECTION 14: Phase 9 Notifications & Activity
+    // -------------------------------------------------------------
+    console.log('\n--- Section 14: Phase 9 Notifications & Activity ---');
+
+    // 231. Unauthenticated GET /api/notifications -> 401
+    const unauthNotifsRes = await request('/api/notifications');
+    assert(unauthNotifsRes.status === 401, 'Unauthenticated GET /api/notifications returns 401');
+
+    // 232. Authenticated GET /api/notifications returns notifications
+    const notifsUser2 = await request('/api/notifications', { token: token2 });
+    assert(
+      notifsUser2.status === 200 &&
+        notifsUser2.data.success === true &&
+        Array.isArray(notifsUser2.data.data),
+      'GET /api/notifications returns paginated notifications for user'
+    );
+
+    // 233. Pagination and unreadCount support
+    assert(
+      typeof notifsUser2.data.pagination.page === 'number' &&
+        typeof notifsUser2.data.unreadCount === 'number',
+      'Notifications response contains pagination and unreadCount metadata'
+    );
+
+    // 234. GET /api/notifications/unread-count
+    const unreadCountRes = await request('/api/notifications/unread-count', {
+      token: token2,
+    });
+    assert(
+      unreadCountRes.status === 200 &&
+        typeof unreadCountRes.data.data.unreadCount === 'number',
+      'GET /api/notifications/unread-count returns unread count'
+    );
+
+    // 235. Collaboration trigger: Add collaborator creates notification for User 2
+    // Create a dedicated trip for notification testing
+    const notifTripRes = await request('/api/trips', {
+      method: 'POST',
+      token: token1,
+      body: {
+        title: 'Notification Testing Trip',
+        startDate: '2026-12-10',
+        endDate: '2026-12-20',
+      },
+    });
+    const notifTripId = notifTripRes.data.data.trip._id;
+
+    // Owner adds User 2 as EDITOR
+    const addCollabRes = await request(`/api/trips/${notifTripId}/collaborators`, {
+      method: 'POST',
+      token: token1,
+      body: {
+        email: 'p2user2@example.com',
+        role: 'EDITOR',
+      },
+    });
+    const collab2RecordId = addCollabRes.data.data.collaborator._id;
+
+    // Check that User 2 received COLLABORATOR_ADDED notification
+    const u2NotifsAfterAdd = await request('/api/notifications', { token: token2 });
+    const addedNotif = u2NotifsAfterAdd.data.data.find(
+      (n: any) => n.type === 'COLLABORATOR_ADDED' && n.trip && n.trip._id === notifTripId
+    );
+    assert(
+      Boolean(addedNotif) && addedNotif.title === 'Added to Trip',
+      'Adding collaborator creates COLLABORATOR_ADDED notification for the invitee'
+    );
+
+    // 236. Collaboration trigger: Update role creates COLLABORATOR_ROLE_UPDATED notification
+    await request(`/api/trips/${notifTripId}/collaborators/${collab2RecordId}`, {
+      method: 'PUT',
+      token: token1,
+      body: {
+        role: 'VIEWER',
+      },
+    });
+    const u2NotifsAfterRole = await request('/api/notifications', { token: token2 });
+    const roleNotif = u2NotifsAfterRole.data.data.find(
+      (n: any) => n.type === 'COLLABORATOR_ROLE_UPDATED' && n.trip && n.trip._id === notifTripId
+    );
+    assert(
+      Boolean(roleNotif) && roleNotif.title === 'Trip Role Updated',
+      'Updating collaborator role creates COLLABORATOR_ROLE_UPDATED notification'
+    );
+
+    // 237. Collaboration trigger: Remove collaborator creates COLLABORATOR_REMOVED notification
+    await request(`/api/trips/${notifTripId}/collaborators/${collab2RecordId}`, {
+      method: 'DELETE',
+      token: token1,
+    });
+    const u2NotifsAfterRemove = await request('/api/notifications', { token: token2 });
+    const removeNotif = u2NotifsAfterRemove.data.data.find(
+      (n: any) => n.type === 'COLLABORATOR_REMOVED' && n.trip && n.trip._id === notifTripId
+    );
+    assert(
+      Boolean(removeNotif) && removeNotif.title === 'Removed from Trip',
+      'Removing collaborator creates COLLABORATOR_REMOVED notification'
+    );
+
+    // 238. Actor (Owner) does not receive self-notification when adding collaborator
+    const u1Notifs = await request('/api/notifications', { token: token1 });
+    const selfCollabNotif = u1Notifs.data.data.find(
+      (n: any) => n.type === 'COLLABORATOR_ADDED' && n.trip && n.trip._id === notifTripId
+    );
+    assert(
+      !selfCollabNotif,
+      'Owner does not receive self-notification when adding collaborators'
+    );
+
+    // 239. Community trigger: Liking another user post creates POST_LIKED notification
+    // User 2 creates a post
+    const u2PostRes = await request('/api/community/posts', {
+      method: 'POST',
+      token: token2,
+      body: { content: 'Exploring Varanasi ghats during sunrise! #varanasi #sunrise' },
+    });
+    const u2PostId = u2PostRes.data.data._id;
+
+    // User 1 likes User 2's post
+    await request(`/api/community/posts/${u2PostId}/like`, {
+      method: 'POST',
+      token: token1,
+    });
+
+    const u2NotifsAfterLike = await request('/api/notifications', { token: token2 });
+    const likeNotif = u2NotifsAfterLike.data.data.find(
+      (n: any) => n.type === 'POST_LIKED' && n.post && n.post._id === u2PostId
+    );
+    assert(
+      Boolean(likeNotif) && likeNotif.title === 'New Like',
+      'Liking another user post creates POST_LIKED notification for the author'
+    );
+
+    // 240. Community trigger: Liking own post does NOT create self-notification
+    await request(`/api/community/posts/${u2PostId}/like`, {
+      method: 'POST',
+      token: token2,
+    });
+    const u2NotifsAfterSelfLike = await request('/api/notifications', { token: token2 });
+    const selfLikeNotifs = u2NotifsAfterSelfLike.data.data.filter(
+      (n: any) => n.type === 'POST_LIKED' && n.actor && n.actor._id === u2NotifsAfterSelfLike.data.data[0].recipient
+    );
+    assert(
+      selfLikeNotifs.length === 0,
+      'Liking own post does not create self-notification'
+    );
+
+    // 241. Community trigger: Commenting on another user post creates POST_COMMENTED notification
+    await request(`/api/community/posts/${u2PostId}/comments`, {
+      method: 'POST',
+      token: token1,
+      body: { content: 'Stunning view! Truly spiritual place.' },
+    });
+    const u2NotifsAfterComment = await request('/api/notifications', { token: token2 });
+    const commentNotif = u2NotifsAfterComment.data.data.find(
+      (n: any) => n.type === 'POST_COMMENTED' && n.post && n.post._id === u2PostId
+    );
+    assert(
+      Boolean(commentNotif) && commentNotif.title === 'New Comment',
+      'Commenting on another user post creates POST_COMMENTED notification for author'
+    );
+
+    // 242. Itinerary trigger: Editor creates stop -> Owner receives ITINERARY_UPDATED
+    // Re-add User 3 as EDITOR on notifTripId
+    await request(`/api/trips/${notifTripId}/collaborators`, {
+      method: 'POST',
+      token: token1,
+      body: { email: 'collaborator@example.com', role: 'EDITOR' },
+    });
+
+    // User 3 (Editor) adds a stop
+    await request(`/api/trips/${notifTripId}/stops`, {
+      method: 'POST',
+      token: token3,
+      body: {
+        cityId,
+        startDate: '2026-12-10',
+        endDate: '2026-12-15',
+      },
+    });
+
+    const u1NotifsAfterItinerary = await request('/api/notifications', { token: token1 });
+    const itinNotif = u1NotifsAfterItinerary.data.data.find(
+      (n: any) => n.type === 'ITINERARY_UPDATED' && n.trip && n.trip._id === notifTripId
+    );
+    assert(
+      Boolean(itinNotif) && itinNotif.title === 'Itinerary Updated',
+      'Editor adding stop creates ITINERARY_UPDATED notification for trip owner'
+    );
+
+    // 243. Budget trigger: Over-budget expense generates TRIP_OVER_BUDGET notification
+    // Set budget on notifTrip
+    await request(`/api/trips/${notifTripId}/budget`, {
+      method: 'PUT',
+      token: token1,
+      body: { totalBudget: 1000, currency: 'USD' },
+    });
+
+    // Add expense exceeding budget
+    await request(`/api/trips/${notifTripId}/expenses`, {
+      method: 'POST',
+      token: token1,
+      body: {
+        title: 'Helicopter City Tour',
+        amount: 2500,
+        currency: 'USD',
+        category: 'ACTIVITY',
+        date: '2026-12-11',
+      },
+    });
+
+    const u1NotifsAfterBudget = await request('/api/notifications', { token: token1 });
+    const overBudgetNotif = u1NotifsAfterBudget.data.data.find(
+      (n: any) => n.type === 'TRIP_OVER_BUDGET' && n.trip && n.trip._id === notifTripId
+    );
+    assert(
+      Boolean(overBudgetNotif) && overBudgetNotif.title === 'Trip Over Budget',
+      'Over-budget expense triggers TRIP_OVER_BUDGET notification for trip owner'
+    );
+
+    // 244. Mark single notification as read (PUT /api/notifications/:id/read)
+    const targetNotifId = addedNotif._id;
+    const markReadRes = await request(`/api/notifications/${targetNotifId}/read`, {
+      method: 'PUT',
+      token: token2,
+    });
+    assert(
+      markReadRes.status === 200 &&
+        markReadRes.data.success === true &&
+        markReadRes.data.data.isRead === true,
+      'PUT /api/notifications/:id/read marks single notification as read'
+    );
+
+    // 245. User cannot mark another user notification as read (403)
+    const forbiddenMarkRead = await request(`/api/notifications/${targetNotifId}/read`, {
+      method: 'PUT',
+      token: token1, // User 1 attempting to modify User 2's notification
+    });
+    assert(
+      forbiddenMarkRead.status === 403,
+      'User cannot mark another user notification as read (403 Forbidden)'
+    );
+
+    // 246. Mark all notifications as read (PUT /api/notifications/read-all)
+    const markAllReadRes = await request('/api/notifications/read-all', {
+      method: 'PUT',
+      token: token2,
+    });
+    assert(
+      markAllReadRes.status === 200 &&
+        markAllReadRes.data.success === true,
+      'PUT /api/notifications/read-all marks all notifications for user as read'
+    );
+
+    // Verify unread count is now 0 for User 2
+    const unreadZeroRes = await request('/api/notifications/unread-count', {
+      token: token2,
+    });
+    assert(
+      unreadZeroRes.status === 200 && unreadZeroRes.data.data.unreadCount === 0,
+      'Unread count becomes 0 after mark-all-read'
+    );
+
+    // 247. User cannot delete another user notification (403)
+    const forbiddenDeleteNotif = await request(`/api/notifications/${targetNotifId}`, {
+      method: 'DELETE',
+      token: token1,
+    });
+    assert(
+      forbiddenDeleteNotif.status === 403,
+      'User cannot delete another user notification (403 Forbidden)'
+    );
+
+    // 248. User can delete own notification (DELETE /api/notifications/:id)
+    const deleteNotifRes = await request(`/api/notifications/${targetNotifId}`, {
+      method: 'DELETE',
+      token: token2,
+    });
+    assert(
+      deleteNotifRes.status === 200 && deleteNotifRes.data.success === true,
+      'User can delete own notification (200)'
+    );
+
+    // 249. Deleted notification returns 404
+    const checkDeletedNotif = await request(`/api/notifications/${targetNotifId}/read`, {
+      method: 'PUT',
+      token: token2,
+    });
+    assert(
+      checkDeletedNotif.status === 404,
+      'Deleted notification returns 404 on subsequent access attempt'
+    );
+
+    // 250. Privacy & Security: Notifications do not leak sensitive fields
+    const notifsPayload = JSON.stringify(u1NotifsAfterBudget.data);
+    assert(
+      !notifsPayload.includes('passwordHash') &&
+        !notifsPayload.includes('publicShareToken'),
+      'Notification payloads do not leak passwordHash or publicShareToken'
+    );
+
     console.log(`\n============================================================`);
     console.log(`TEST SUMMARY: ${passedTests} passed, ${failedTests} failed`);
     console.log(`============================================================\n`);

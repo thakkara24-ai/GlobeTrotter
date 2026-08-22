@@ -145,9 +145,6 @@ const userSchema = new Schema<IUser>(
   }
 );
 
-// Indexes
-userSchema.index({ username: 1 }, { sparse: true, unique: true });
-
 /**
  * Returns a safe user object without passwordHash.
  */

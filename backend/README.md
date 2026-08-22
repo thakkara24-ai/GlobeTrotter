@@ -159,6 +159,15 @@ npm test        # Run comprehensive test suite
 | PUT    | `/api/community/posts/:postId/comments/:commentId` | Required (Author) | Update comment content |
 | DELETE | `/api/community/posts/:postId/comments/:commentId` | Required (Author) | Delete comment and decrement post comment count |
 
+### Notifications & Activity (Phase 9)
+| Method | Endpoint             | Auth     | Description            |
+| ------ | -------------------- | -------- | ---------------------- |
+| GET    | `/api/notifications` | Required | Get user notifications with pagination & unread filter (`?page=&limit=&unread=`) |
+| GET    | `/api/notifications/unread-count` | Required | Get real-time unread notification count |
+| PUT    | `/api/notifications/:notificationId/read` | Required (Recipient) | Mark a single notification as read |
+| PUT    | `/api/notifications/read-all` | Required | Mark all user notifications as read |
+| DELETE | `/api/notifications/:notificationId` | Required (Recipient) | Delete a notification |
+
 ## Architecture & Data Models
 
 ```
@@ -204,6 +213,7 @@ Routes → Controllers → Services → Models → MongoDB
 
 ### Models
 - **`User`**: User accounts, credentials (passwordHash select: false), username, bio, location, travel interests, and public profile export.
+- **`Notification`**: User activity and event notifications with recipient, actor, type, read state, and trip/post references.
 - **`CommunityPost`**: Public travel posts with author, content, images, tags, optional city/trip references, likeCount, and commentCount.
 - **`PostLike`**: Compound indexed user likes on community posts (`{ post: 1, user: 1 }` unique).
 - **`PostComment`**: User comments on community posts with author reference and post timestamp indexing.
@@ -217,6 +227,8 @@ Routes → Controllers → Services → Models → MongoDB
 
 ### Validation & Relationship Rules
 - **Trip Ownership & Collaboration:** Every trip, itinerary, map, and expense action strictly validates effective role (`OWNER`, `EDITOR`, `VIEWER`). Non-collaborators receive `403 Forbidden`.
+- **Notification Privacy & Ownership:** Users can only view, mark as read, or delete notifications where `recipient === req.user._id`.
+- **Self-Action Suppression:** Notification engine suppresses self-notifications when `actor === recipient`.
 - **Post & Comment Ownership:** Only post/comment authors can update or delete their respective content.
 - **Cascading Deletes:**
   - Deleting a `TripStop` removes all child `ItinerarySection` records.

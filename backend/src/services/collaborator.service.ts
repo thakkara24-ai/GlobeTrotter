@@ -6,6 +6,8 @@ import TripCollaborator, {
   ITripCollaborator,
 } from '../models/TripCollaborator';
 import { AddCollaboratorInput } from '../validators/collaborator.validator';
+import notificationService from './notification.service';
+import { NotificationType } from '../models/Notification';
 
 export type EffectiveRole = 'OWNER' | 'EDITOR' | 'VIEWER';
 
@@ -139,6 +141,17 @@ class CollaboratorService {
     await collaborator.save();
     await collaborator.populate('user', '_id name email');
 
+    // Notify added collaborator
+    await notificationService.createNotification({
+      recipient: targetUser._id,
+      actor: ownerId,
+      type: NotificationType.COLLABORATOR_ADDED,
+      title: 'Added to Trip',
+      message: `You were added as a ${collaborator.role} on "${trip.title}"`,
+      trip: tripId,
+      metadata: { role: collaborator.role },
+    });
+
     return collaborator;
   }
 
@@ -169,7 +182,7 @@ class CollaboratorService {
     ownerId: string,
     newRole: CollaboratorRole
   ): Promise<ITripCollaborator> {
-    await this.requireTripAccess(tripId, ownerId, 'OWNER');
+    const { trip } = await this.requireTripAccess(tripId, ownerId, 'OWNER');
 
     if (!mongoose.Types.ObjectId.isValid(collaboratorId)) {
       const error = new Error('Invalid collaborator ID format');
@@ -192,6 +205,18 @@ class CollaboratorService {
     await collaborator.save();
     await collaborator.populate('user', '_id name email');
 
+    // Notify collaborator of role update
+    const targetUserId = (collaborator.user as any)?._id || collaborator.user;
+    await notificationService.createNotification({
+      recipient: targetUserId,
+      actor: ownerId,
+      type: NotificationType.COLLABORATOR_ROLE_UPDATED,
+      title: 'Trip Role Updated',
+      message: `Your role on "${trip.title}" was updated to ${newRole}`,
+      trip: tripId,
+      metadata: { newRole },
+    });
+
     return collaborator;
   }
 
@@ -204,7 +229,7 @@ class CollaboratorService {
     collaboratorId: string,
     ownerId: string
   ): Promise<void> {
-    await this.requireTripAccess(tripId, ownerId, 'OWNER');
+    const { trip } = await this.requireTripAccess(tripId, ownerId, 'OWNER');
 
     if (!mongoose.Types.ObjectId.isValid(collaboratorId)) {
       const error = new Error('Invalid collaborator ID format');
@@ -222,6 +247,17 @@ class CollaboratorService {
       (error as any).statusCode = 404;
       throw error;
     }
+
+    // Notify removed collaborator
+    const removedUserId = (collaborator.user as any)?._id || collaborator.user;
+    await notificationService.createNotification({
+      recipient: removedUserId,
+      actor: ownerId,
+      type: NotificationType.COLLABORATOR_REMOVED,
+      title: 'Removed from Trip',
+      message: `You were removed as a collaborator from "${trip.title}"`,
+      trip: tripId,
+    });
   }
 }
 

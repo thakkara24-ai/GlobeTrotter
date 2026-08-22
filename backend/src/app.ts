@@ -17,6 +17,7 @@ import publicRoutes from './routes/public.routes';
 import profileRoutes from './routes/profile.routes';
 import userRoutes from './routes/user.routes';
 import communityRoutes from './routes/community.routes';
+import notificationRoutes from './routes/notification.routes';
 
 // Middleware
 import { notFoundHandler } from './middleware/notFound.middleware';
@@ -48,6 +49,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/community', communityRoutes);
+app.use('/api/notifications', notificationRoutes);
 app.use('/api/public', publicRoutes);
 app.use('/api/cities', cityRoutes);
 app.use('/api/activities', activityRoutes);

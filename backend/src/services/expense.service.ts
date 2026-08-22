@@ -8,6 +8,8 @@ import {
   ExpenseQuery,
 } from '../validators/expense.validator';
 import { PaginatedResult } from './city.service';
+import notificationService from './notification.service';
+import { NotificationType } from '../models/Notification';
 
 export interface BudgetSummary {
   totalBudget: number;
@@ -212,6 +214,23 @@ class ExpenseService {
       date: new Date(data.date),
       notes: data.notes || '',
     });
+
+    // Check if trip became over budget
+    const totalBudget = trip.budget?.totalBudget || 0;
+    if (totalBudget > 0) {
+      const summary = await this.getBudgetSummary(tripId, userId);
+      if (summary.overBudget) {
+        await notificationService.createNotification({
+          recipient: trip.user,
+          actor: userId,
+          type: NotificationType.TRIP_OVER_BUDGET,
+          title: 'Trip Over Budget',
+          message: `Your trip "${trip.title}" has exceeded its budget of ${totalBudget} ${currency}. Total spent: ${summary.totalSpent}`,
+          trip: tripId,
+          metadata: { totalBudget, totalSpent: summary.totalSpent },
+        });
+      }
+    }
 
     return expense;
   }
