@@ -5,6 +5,11 @@ import mongoose from 'mongoose';
 import connectDB from '../config/database';
 import City from '../models/City';
 import Activity from '../models/Activity';
+import Trip from '../models/Trip';
+import TripStop from '../models/TripStop';
+import ItinerarySection, { ItinerarySectionType } from '../models/ItinerarySection';
+import User from '../models/User';
+import { hashPassword } from '../utils/password';
 
 const cities = [
   {
@@ -141,7 +146,6 @@ const cities = [
   },
 ];
 
-// Activities keyed by city name for easy mapping
 const activitiesByCity: Record<string, Array<{
   name: string;
   description: string;
@@ -372,6 +376,7 @@ async function seed() {
     }
 
     // Seed activities (upsert by name + city to avoid duplicates)
+    const activityDocs: Record<string, mongoose.Types.ObjectId> = {};
     let activityCount = 0;
     for (const [cityName, activities] of Object.entries(activitiesByCity)) {
       const cityId = cityDocs[cityName];
@@ -381,16 +386,152 @@ async function seed() {
       }
 
       for (const actData of activities) {
-        await Activity.findOneAndUpdate(
+        const act = await Activity.findOneAndUpdate(
           { name: actData.name, city: cityId },
           { $set: { ...actData, city: cityId } },
           { upsert: true, new: true }
         );
+        activityDocs[actData.name] = act._id as mongoose.Types.ObjectId;
         activityCount++;
       }
     }
 
     console.log(`Seed complete: ${cities.length} cities, ${activityCount} activities`);
+
+    // Create a demo user for sample itinerary data
+    const demoPasswordHash = await hashPassword('DemoUser123!');
+    const demoUser = await User.findOneAndUpdate(
+      { email: 'demo@globetrotter.local' },
+      {
+        $set: {
+          name: 'Demo Traveler',
+          email: 'demo@globetrotter.local',
+          passwordHash: demoPasswordHash,
+        },
+      },
+      { upsert: true, new: true }
+    );
+
+    // Create a sample trip with multiple stops and sections
+    const delhiId = cityDocs['Delhi'];
+    const jaipurId = cityDocs['Jaipur'];
+
+    if (delhiId && jaipurId) {
+      const sampleTrip = await Trip.findOneAndUpdate(
+        { user: demoUser._id, title: 'Golden Triangle Explorer' },
+        {
+          $set: {
+            user: demoUser._id,
+            title: 'Golden Triangle Explorer',
+            description: 'Exploration of historical wonders across Delhi and Jaipur.',
+            startDate: new Date('2026-10-01'),
+            endDate: new Date('2026-10-08'),
+            cities: [delhiId, jaipurId],
+            status: 'PLANNING',
+          },
+        },
+        { upsert: true, new: true }
+      );
+
+      // Stop 1: Delhi
+      const stop1 = await TripStop.findOneAndUpdate(
+        { tripId: sampleTrip._id, cityId: delhiId },
+        {
+          $set: {
+            tripId: sampleTrip._id,
+            cityId: delhiId,
+            startDate: new Date('2026-10-01'),
+            endDate: new Date('2026-10-04'),
+            order: 1,
+          },
+        },
+        { upsert: true, new: true }
+      );
+
+      // Stop 2: Jaipur
+      const stop2 = await TripStop.findOneAndUpdate(
+        { tripId: sampleTrip._id, cityId: jaipurId },
+        {
+          $set: {
+            tripId: sampleTrip._id,
+            cityId: jaipurId,
+            startDate: new Date('2026-10-04'),
+            endDate: new Date('2026-10-08'),
+            order: 2,
+          },
+        },
+        { upsert: true, new: true }
+      );
+
+      // Section 1 on Stop 1: Red Fort
+      const redFortId = activityDocs['Red Fort Tour'];
+      await ItinerarySection.findOneAndUpdate(
+        { stopId: stop1._id, title: 'Explore Red Fort' },
+        {
+          $set: {
+            tripId: sampleTrip._id,
+            stopId: stop1._id,
+            type: ItinerarySectionType.ACTIVITY,
+            title: 'Explore Red Fort',
+            description: 'Morning historical walking tour',
+            date: new Date('2026-10-02'),
+            startTime: '09:30',
+            endTime: '12:00',
+            estimatedCost: 10,
+            activityId: redFortId,
+            order: 1,
+          },
+        },
+        { upsert: true, new: true }
+      );
+
+      // Section 2 on Stop 1: Street Food
+      const streetFoodId = activityDocs['Street Food Walk in Chandni Chowk'];
+      await ItinerarySection.findOneAndUpdate(
+        { stopId: stop1._id, title: 'Chandni Chowk Dinner' },
+        {
+          $set: {
+            tripId: sampleTrip._id,
+            stopId: stop1._id,
+            type: ItinerarySectionType.MEAL,
+            title: 'Chandni Chowk Dinner',
+            description: 'Authentic local street food experience',
+            date: new Date('2026-10-02'),
+            startTime: '18:00',
+            endTime: '20:30',
+            estimatedCost: 15,
+            activityId: streetFoodId,
+            order: 2,
+          },
+        },
+        { upsert: true, new: true }
+      );
+
+      // Section 1 on Stop 2: Amber Fort
+      const amberFortId = activityDocs['Amber Fort Visit'];
+      await ItinerarySection.findOneAndUpdate(
+        { stopId: stop2._id, title: 'Amber Fort Morning Visit' },
+        {
+          $set: {
+            tripId: sampleTrip._id,
+            stopId: stop2._id,
+            type: ItinerarySectionType.ACTIVITY,
+            title: 'Amber Fort Morning Visit',
+            description: 'Panoramic views and Rajput architecture',
+            date: new Date('2026-10-05'),
+            startTime: '09:00',
+            endTime: '12:30',
+            estimatedCost: 12,
+            activityId: amberFortId,
+            order: 1,
+          },
+        },
+        { upsert: true, new: true }
+      );
+
+      console.log(`Sample itinerary seeded for trip "${sampleTrip.title}" with 2 stops and 3 sections`);
+    }
+
     process.exit(0);
   } catch (error) {
     console.error('Seed failed:', error);

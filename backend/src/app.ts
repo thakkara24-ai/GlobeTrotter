@@ -8,6 +8,7 @@ import authRoutes from './routes/auth.routes';
 import cityRoutes from './routes/city.routes';
 import activityRoutes from './routes/activity.routes';
 import tripRoutes from './routes/trip.routes';
+import itineraryRoutes from './routes/itinerary.routes';
 
 // Middleware
 import { notFoundHandler } from './middleware/notFound.middleware';
@@ -38,6 +39,7 @@ app.use('/api/health', healthRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/cities', cityRoutes);
 app.use('/api/activities', activityRoutes);
+app.use('/api/trips', itineraryRoutes);
 app.use('/api/trips', tripRoutes);
 
 // --------------- Error Handling ---------------

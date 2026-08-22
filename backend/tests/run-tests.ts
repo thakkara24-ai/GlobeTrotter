@@ -9,6 +9,8 @@ import User from '../src/models/User';
 import City from '../src/models/City';
 import Activity from '../src/models/Activity';
 import Trip from '../src/models/Trip';
+import TripStop from '../src/models/TripStop';
+import ItinerarySection from '../src/models/ItinerarySection';
 
 const PORT = 5002;
 let server: Server;
@@ -75,9 +77,9 @@ async function runTests() {
   try {
     await connectDB();
     server = app.listen(PORT);
-    console.log(`\n================ STARTING PHASE 1 & 2 TESTS ================\n`);
+    console.log(`\n================ STARTING FULL BACKEND TEST SUITE ================\n`);
 
-    // Clean up previous test users and trips
+    // Clean up previous test users, trips, stops, and sections
     await User.deleteMany({ email: { $in: ['p2user1@example.com', 'p2user2@example.com'] } });
     await Trip.deleteMany({ title: { $regex: /Test Trip/i } });
 
@@ -182,6 +184,11 @@ async function runTests() {
       'GET /api/cities/:id returns single city'
     );
 
+    // Find a second city (e.g. Paris or Jaipur) for stop testing
+    const jaipurCityRes = await request('/api/cities?search=Jaipur');
+    const jaipurCity = jaipurCityRes.data.data.cities.find((c: any) => c.name === 'Jaipur');
+    const city2Id = jaipurCity ? jaipurCity._id : citiesRes.data.data.cities[1]._id;
+
     // -------------------------------------------------------------
     // SECTION 3: Activities API
     // -------------------------------------------------------------
@@ -220,7 +227,7 @@ async function runTests() {
     );
 
     // 14. Single activity populated with city
-    const sampleActivity = activitiesRes.data.data.activities[0];
+    const sampleActivity = cityActRes.data.data.activities[0] || activitiesRes.data.data.activities[0];
     const singleActRes = await request(`/api/activities/${sampleActivity._id}`);
     assert(
       singleActRes.status === 200 &&
@@ -229,6 +236,10 @@ async function runTests() {
         typeof singleActRes.data.data.activity.city === 'object',
       'GET /api/activities/:id returns activity with populated city'
     );
+
+    // Find activity belonging to city 2 (Jaipur)
+    const jaipurActsRes = await request(`/api/activities?city=${city2Id}`);
+    const jaipurActivity = jaipurActsRes.data.data.activities[0];
 
     // -------------------------------------------------------------
     // SECTION 4: Trips API (CRUD, Dates, Ownership & Authorization)
@@ -266,7 +277,7 @@ async function runTests() {
         title: 'Test Trip Rajasthan',
         description: 'Seven day exploration',
         startDate: '2026-10-01',
-        endDate: '2026-10-07',
+        endDate: '2026-10-14',
         cities: [cityId],
         activities: [sampleActivity._id],
         status: 'PLANNING',
@@ -277,8 +288,7 @@ async function runTests() {
         createTripRes.data.success === true &&
         createTripRes.data.data.trip.title === 'Test Trip Rajasthan' &&
         createTripRes.data.data.trip.user === user1Id,
-      'POST /api/trips creates trip with user ownership and populated relations',
-      createTripRes.data
+      'POST /api/trips creates trip with user ownership and populated relations'
     );
     const trip1Id = createTripRes.data.data.trip._id;
 
@@ -355,8 +365,19 @@ async function runTests() {
       'DELETE /api/trips/:id by non-owner returns 403'
     );
 
-    // 25. Delete trip by owner (User 1) -> 200
-    const deleteRes = await request(`/api/trips/${trip1Id}`, {
+    // 25. Create separate trip to test delete
+    const tripToDelete = await request('/api/trips', {
+      method: 'POST',
+      token: token1,
+      body: {
+        title: 'Test Trip To Delete',
+        startDate: '2026-11-01',
+        endDate: '2026-11-05',
+      },
+    });
+    const tripToDeleteId = tripToDelete.data.data.trip._id;
+
+    const deleteRes = await request(`/api/trips/${tripToDeleteId}`, {
       method: 'DELETE',
       token: token1,
     });
@@ -366,10 +387,359 @@ async function runTests() {
     );
 
     // 26. Get deleted trip -> 404
-    const getDeletedTrip = await request(`/api/trips/${trip1Id}`, { token: token1 });
+    const getDeletedTrip = await request(`/api/trips/${tripToDeleteId}`, { token: token1 });
     assert(
       getDeletedTrip.status === 404,
       'GET /api/trips/:id after deletion returns 404'
+    );
+
+    // -------------------------------------------------------------
+    // SECTION 5: Phase 3 Itinerary Builder Tests (Stops & Sections)
+    // -------------------------------------------------------------
+    console.log('\n--- Section 5: Phase 3 Itinerary Builder APIs ---');
+
+    // 27. GET itinerary without token -> 401
+    const unauthItinerary = await request(`/api/trips/${trip1Id}/itinerary`);
+    assert(unauthItinerary.status === 401, 'GET /api/trips/:id/itinerary without token returns 401');
+
+    // 28. GET itinerary for non-owner (User 2) -> 403
+    const forbiddenItinerary = await request(`/api/trips/${trip1Id}/itinerary`, { token: token2 });
+    assert(forbiddenItinerary.status === 403, 'GET /api/trips/:id/itinerary for non-owner returns 403');
+
+    // 29. Create stop without token -> 401
+    const unauthStop = await request(`/api/trips/${trip1Id}/stops`, {
+      method: 'POST',
+      body: {
+        cityId: cityId,
+        startDate: '2026-10-01',
+        endDate: '2026-10-05',
+      },
+    });
+    assert(unauthStop.status === 401, 'POST /api/trips/:id/stops without token returns 401');
+
+    // 30. Create stop with invalid city -> 404
+    const invalidCityStop = await request(`/api/trips/${trip1Id}/stops`, {
+      method: 'POST',
+      token: token1,
+      body: {
+        cityId: '6a895d6d57d038761b987fff', // Non-existent ObjectId
+        startDate: '2026-10-01',
+        endDate: '2026-10-05',
+      },
+    });
+    assert(invalidCityStop.status === 404, 'POST /api/trips/:id/stops with non-existent city returns 404');
+
+    // 31. Create stop with startDate > endDate -> 400
+    const invalidDatesStop = await request(`/api/trips/${trip1Id}/stops`, {
+      method: 'POST',
+      token: token1,
+      body: {
+        cityId: cityId,
+        startDate: '2026-10-06',
+        endDate: '2026-10-02',
+      },
+    });
+    assert(invalidDatesStop.status === 400, 'POST /api/trips/:id/stops with startDate > endDate returns 400');
+
+    // 32. Create valid Stop 1 (Delhi)
+    const createStop1Res = await request(`/api/trips/${trip1Id}/stops`, {
+      method: 'POST',
+      token: token1,
+      body: {
+        cityId: cityId,
+        startDate: '2026-10-01',
+        endDate: '2026-10-05',
+        order: 1,
+      },
+    });
+    assert(
+      createStop1Res.status === 201 &&
+        createStop1Res.data.success === true &&
+        createStop1Res.data.data.stop.city.name === 'Delhi' &&
+        createStop1Res.data.data.stop.order === 1,
+      'POST /api/trips/:id/stops creates Stop 1 (Delhi) with populated city'
+    );
+    const stop1Id = createStop1Res.data.data.stop._id;
+
+    // 33. Create valid Stop 2 (Jaipur) without explicit order (auto-order)
+    const createStop2Res = await request(`/api/trips/${trip1Id}/stops`, {
+      method: 'POST',
+      token: token1,
+      body: {
+        cityId: city2Id,
+        startDate: '2026-10-05',
+        endDate: '2026-10-10',
+      },
+    });
+    assert(
+      createStop2Res.status === 201 &&
+        createStop2Res.data.data.stop.order === 2,
+      'POST /api/trips/:id/stops creates Stop 2 with auto-calculated order = 2'
+    );
+    const stop2Id = createStop2Res.data.data.stop._id;
+
+    // 34. Non-owner cannot update stop -> 403
+    const nonOwnerUpdateStop = await request(`/api/trips/${trip1Id}/stops/${stop1Id}`, {
+      method: 'PUT',
+      token: token2,
+      body: {
+        order: 5,
+      },
+    });
+    assert(nonOwnerUpdateStop.status === 403, 'PUT /api/trips/:id/stops/:stopId by non-owner returns 403');
+
+    // 35. Non-owner cannot delete stop -> 403
+    const nonOwnerDeleteStop = await request(`/api/trips/${trip1Id}/stops/${stop1Id}`, {
+      method: 'DELETE',
+      token: token2,
+    });
+    assert(nonOwnerDeleteStop.status === 403, 'DELETE /api/trips/:id/stops/:stopId by non-owner returns 403');
+
+    // 36. Update Stop 1 (modify dates) by owner -> 200
+    const updateStop1Res = await request(`/api/trips/${trip1Id}/stops/${stop1Id}`, {
+      method: 'PUT',
+      token: token1,
+      body: {
+        startDate: '2026-10-01',
+        endDate: '2026-10-06',
+      },
+    });
+    assert(updateStop1Res.status === 200, 'PUT /api/trips/:id/stops/:stopId successfully updates stop dates');
+
+    // 37. Create Itinerary Section 1 (Red Fort Activity on Stop 1)
+    const createSec1Res = await request(`/api/trips/${trip1Id}/stops/${stop1Id}/sections`, {
+      method: 'POST',
+      token: token1,
+      body: {
+        type: 'ACTIVITY',
+        title: 'Morning Red Fort Tour',
+        description: 'Guided tour of historical monuments',
+        date: '2026-10-02',
+        startTime: '09:00',
+        endTime: '11:30',
+        estimatedCost: 15,
+        activityId: sampleActivity._id,
+        order: 1,
+      },
+    });
+    assert(
+      createSec1Res.status === 201 &&
+        createSec1Res.data.success === true &&
+        createSec1Res.data.data.section.title === 'Morning Red Fort Tour' &&
+        createSec1Res.data.data.section.activity &&
+        createSec1Res.data.data.section.activity.name === sampleActivity.name,
+      'POST /api/trips/:id/stops/:stopId/sections creates section with populated activity'
+    );
+    const sec1Id = createSec1Res.data.data.section._id;
+
+    // 38. Create Section with invalid stop/trip relationship -> 400
+    const invalidStopSec = await request(`/api/trips/${trip1Id}/stops/6a895d6d57d038761b987eee/sections`, {
+      method: 'POST',
+      token: token1,
+      body: {
+        type: 'ACTIVITY',
+        title: 'Mismatched stop section',
+        date: '2026-10-02',
+      },
+    });
+    assert(invalidStopSec.status === 404 || invalidStopSec.status === 400, 'POST section with non-existent stop returns error');
+
+    // 39. Create Section with invalid activity ID -> 404
+    const invalidActSec = await request(`/api/trips/${trip1Id}/stops/${stop1Id}/sections`, {
+      method: 'POST',
+      token: token1,
+      body: {
+        type: 'ACTIVITY',
+        title: 'Non-existent activity section',
+        date: '2026-10-02',
+        activityId: '6a895d6d57d038761b987fff',
+      },
+    });
+    assert(invalidActSec.status === 404, 'POST section with invalid activityId returns 404');
+
+    // 40. Create Section with activity from different city -> 400
+    if (jaipurActivity) {
+      const mismatchedCityActSec = await request(`/api/trips/${trip1Id}/stops/${stop1Id}/sections`, {
+        method: 'POST',
+        token: token1,
+        body: {
+          type: 'ACTIVITY',
+          title: 'Jaipur activity in Delhi stop',
+          date: '2026-10-02',
+          activityId: jaipurActivity._id,
+        },
+      });
+      assert(mismatchedCityActSec.status === 400, 'POST section with activity from different city returns 400');
+    }
+
+    // 41. Create Section with date outside stop range -> 400
+    const outOfRangeDateSec = await request(`/api/trips/${trip1Id}/stops/${stop1Id}/sections`, {
+      method: 'POST',
+      token: token1,
+      body: {
+        type: 'MEAL',
+        title: 'Dinner far in future',
+        date: '2026-12-25',
+      },
+    });
+    assert(outOfRangeDateSec.status === 400, 'POST section with date outside stop date range returns 400');
+
+    // 42. Create Section with negative cost -> 400
+    const negativeCostSec = await request(`/api/trips/${trip1Id}/stops/${stop1Id}/sections`, {
+      method: 'POST',
+      token: token1,
+      body: {
+        type: 'MEAL',
+        title: 'Negative cost dinner',
+        date: '2026-10-03',
+        estimatedCost: -50,
+      },
+    });
+    assert(negativeCostSec.status === 400, 'POST section with negative cost returns 400');
+
+    // 43. Create Section with invalid time range (startTime > endTime) -> 400
+    const invalidTimeSec = await request(`/api/trips/${trip1Id}/stops/${stop1Id}/sections`, {
+      method: 'POST',
+      token: token1,
+      body: {
+        type: 'ACTIVITY',
+        title: 'Time travel activity',
+        date: '2026-10-03',
+        startTime: '16:00',
+        endTime: '12:00',
+      },
+    });
+    assert(invalidTimeSec.status === 400, 'POST section with startTime > endTime returns 400');
+
+    // 44. Create Itinerary Section 2 (Meal) on Stop 1
+    const createSec2Res = await request(`/api/trips/${trip1Id}/stops/${stop1Id}/sections`, {
+      method: 'POST',
+      token: token1,
+      body: {
+        type: 'MEAL',
+        title: 'Karim\'s Mughlai Dinner',
+        description: 'Authentic dinner near Jama Masjid',
+        date: '2026-10-02',
+        startTime: '19:30',
+        endTime: '21:00',
+        estimatedCost: 25,
+        order: 2,
+      },
+    });
+    assert(createSec2Res.status === 201, 'POST /api/trips/:id/stops/:stopId/sections creates Section 2 (Meal)');
+    const sec2Id = createSec2Res.data.data.section._id;
+
+    // 45. Non-owner cannot update section -> 403
+    const nonOwnerUpdateSec = await request(`/api/trips/${trip1Id}/stops/${stop1Id}/sections/${sec1Id}`, {
+      method: 'PUT',
+      token: token2,
+      body: {
+        title: 'Hacked section',
+      },
+    });
+    assert(nonOwnerUpdateSec.status === 403, 'PUT section by non-owner returns 403');
+
+    // 46. Update Section 1 by owner -> 200
+    const updateSec1Res = await request(`/api/trips/${trip1Id}/stops/${stop1Id}/sections/${sec1Id}`, {
+      method: 'PUT',
+      token: token1,
+      body: {
+        title: 'Updated Red Fort Morning Tour',
+        estimatedCost: 20,
+      },
+    });
+    assert(
+      updateSec1Res.status === 200 && updateSec1Res.data.data.section.estimatedCost === 20,
+      'PUT section by owner successfully updates section'
+    );
+
+    // 47. Non-owner cannot delete section -> 403
+    const nonOwnerDeleteSec = await request(`/api/trips/${trip1Id}/stops/${stop1Id}/sections/${sec1Id}`, {
+      method: 'DELETE',
+      token: token2,
+    });
+    assert(nonOwnerDeleteSec.status === 403, 'DELETE section by non-owner returns 403');
+
+    // 48. Reorder Sections on Stop 1 -> 200
+    const reorderSecsRes = await request(`/api/trips/${trip1Id}/stops/${stop1Id}/sections/reorder`, {
+      method: 'PUT',
+      token: token1,
+      body: {
+        sectionIds: [sec2Id, sec1Id],
+      },
+    });
+    assert(
+      reorderSecsRes.status === 200 &&
+        reorderSecsRes.data.data.sections[0]._id === sec2Id &&
+        reorderSecsRes.data.data.sections[0].order === 1 &&
+        reorderSecsRes.data.data.sections[1]._id === sec1Id &&
+        reorderSecsRes.data.data.sections[1].order === 2,
+      'PUT sections/reorder assigns sequential orders correctly'
+    );
+
+    // 49. Reorder Stops on Trip 1 -> 200
+    const reorderStopsRes = await request(`/api/trips/${trip1Id}/stops/reorder`, {
+      method: 'PUT',
+      token: token1,
+      body: {
+        stopIds: [stop2Id, stop1Id],
+      },
+    });
+    assert(
+      reorderStopsRes.status === 200 &&
+        reorderStopsRes.data.data.stops[0]._id === stop2Id &&
+        reorderStopsRes.data.data.stops[0].order === 1 &&
+        reorderStopsRes.data.data.stops[1]._id === stop1Id &&
+        reorderStopsRes.data.data.stops[1].order === 2,
+      'PUT stops/reorder assigns sequential orders correctly'
+    );
+
+    // 50. Date shrinking rejection: try to shrink Stop 1 dates so existing section falls outside -> 400
+    const invalidShrinkStop = await request(`/api/trips/${trip1Id}/stops/${stop1Id}`, {
+      method: 'PUT',
+      token: token1,
+      body: {
+        startDate: '2026-10-04',
+        endDate: '2026-10-06', // Section is on 2026-10-02
+      },
+    });
+    assert(
+      invalidShrinkStop.status === 400,
+      'PUT stop dates rejected when existing sections fall outside new range'
+    );
+
+    // 51. GET Complete Itinerary
+    const fullItineraryRes = await request(`/api/trips/${trip1Id}/itinerary`, { token: token1 });
+    assert(
+      fullItineraryRes.status === 200 &&
+        fullItineraryRes.data.success === true &&
+        fullItineraryRes.data.data.trip._id === trip1Id &&
+        fullItineraryRes.data.data.stops.length === 2 &&
+        fullItineraryRes.data.data.stops[0]._id === stop2Id && // because reordered
+        fullItineraryRes.data.data.stops[1]._id === stop1Id &&
+        fullItineraryRes.data.data.stops[1].sections.length === 2,
+      'GET /api/trips/:id/itinerary returns complete structured itinerary with ordered stops & sections'
+    );
+
+    // 52. Delete an itinerary section -> 200
+    const deleteSecRes = await request(`/api/trips/${trip1Id}/stops/${stop1Id}/sections/${sec2Id}`, {
+      method: 'DELETE',
+      token: token1,
+    });
+    assert(deleteSecRes.status === 200, 'DELETE /api/trips/:id/stops/:stopId/sections/:sectionId deletes section');
+
+    // 53. Delete a stop and verify cascading deletion of sections
+    const deleteStopRes = await request(`/api/trips/${trip1Id}/stops/${stop1Id}`, {
+      method: 'DELETE',
+      token: token1,
+    });
+    assert(deleteStopRes.status === 200, 'DELETE /api/trips/:id/stops/:stopId deletes stop');
+
+    // Verify sections under deleted stop are also deleted from DB
+    const remainingSections = await ItinerarySection.find({ stopId: stop1Id });
+    assert(
+      remainingSections.length === 0,
+      'Deleting a stop cascades and removes all its associated itinerary sections'
     );
 
     console.log(`\n============================================================`);
