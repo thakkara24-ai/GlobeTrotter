@@ -1081,6 +1081,192 @@ async function runTests() {
       'Zero-budget configuration handled safely without NaN or Infinity'
     );
 
+    // -------------------------------------------------------------
+    // SECTION 7: Phase 5 Calendar, Timeline & Itinerary APIs
+    // -------------------------------------------------------------
+    console.log('\n--- Section 7: Phase 5 Calendar, Timeline & Itinerary APIs ---');
+
+    // Set up stops and sections on Trip 1 for Calendar & Timeline testing
+    const setupStop1 = await request(`/api/trips/${trip1Id}/stops`, {
+      method: 'POST',
+      token: token1,
+      body: {
+        cityId: cityId,
+        startDate: '2026-10-01',
+        endDate: '2026-10-04',
+        order: 1,
+      },
+    });
+    const calStop1Id = setupStop1.data.data.stop._id;
+
+    // Section 1 on calStop1 (2026-10-02, 09:00 - 11:30)
+    await request(`/api/trips/${trip1Id}/stops/${calStop1Id}/sections`, {
+      method: 'POST',
+      token: token1,
+      body: {
+        type: 'ACTIVITY',
+        title: 'Morning Historical Walk',
+        description: 'Guided tour around monuments',
+        date: '2026-10-02',
+        startTime: '09:00',
+        endTime: '11:30',
+        estimatedCost: 20,
+        activityId: sampleActivity._id,
+        order: 1,
+      },
+    });
+
+    // Section 2 on calStop1 (2026-10-02, 19:00 - 21:00)
+    await request(`/api/trips/${trip1Id}/stops/${calStop1Id}/sections`, {
+      method: 'POST',
+      token: token1,
+      body: {
+        type: 'MEAL',
+        title: 'Old Town Heritage Dinner',
+        description: 'Authentic regional dishes',
+        date: '2026-10-02',
+        startTime: '19:00',
+        endTime: '21:00',
+        estimatedCost: 35,
+        order: 2,
+      },
+    });
+
+    // Section 3 on calStop1 (2026-10-03, 14:00 - 16:30)
+    await request(`/api/trips/${trip1Id}/stops/${calStop1Id}/sections`, {
+      method: 'POST',
+      token: token1,
+      body: {
+        type: 'TRANSPORT',
+        title: 'Metro & City Transit',
+        description: 'Transiting to arts district',
+        date: '2026-10-03',
+        startTime: '14:00',
+        endTime: '16:30',
+        estimatedCost: 10,
+        order: 1,
+      },
+    });
+
+    // 85. GET /api/trips/:id/calendar without token -> 401
+    const unauthCal = await request(`/api/trips/${trip1Id}/calendar`);
+    assert(unauthCal.status === 401, 'GET /api/trips/:id/calendar without token returns 401');
+
+    // 86. GET /api/trips/:id/calendar for non-owner -> 403
+    const nonOwnerCal = await request(`/api/trips/${trip1Id}/calendar`, { token: token2 });
+    assert(nonOwnerCal.status === 403, 'GET /api/trips/:id/calendar for non-owner returns 403');
+
+    // 87. GET /api/trips/:id/calendar for invalid trip -> 404
+    const invalidTripCal = await request(`/api/trips/6a895d6d57d038761b987eee/calendar`, { token: token1 });
+    assert(invalidTripCal.status === 404, 'GET /api/trips/:id/calendar for non-existent trip returns 404');
+
+    // 88. GET /api/trips/:id/calendar returns structured days & events -> 200
+    const getCalRes = await request(`/api/trips/${trip1Id}/calendar`, { token: token1 });
+    assert(
+      getCalRes.status === 200 &&
+        getCalRes.data.success === true &&
+        getCalRes.data.data.trip._id === trip1Id &&
+        getCalRes.data.data.days.length >= 2 &&
+        getCalRes.data.data.events.length >= 3 &&
+        getCalRes.data.data.events[0].city &&
+        getCalRes.data.data.events[0].city.name &&
+        getCalRes.data.data.events[0].startTime &&
+        getCalRes.data.data.events[0].endTime,
+      'GET /api/trips/:id/calendar returns structured days, events, city, activity, and time bounds'
+    );
+
+    // 89. GET /api/trips/:id/calendar with date range filtering -> 200
+    const filterCalRes = await request(
+      `/api/trips/${trip1Id}/calendar?startDate=2026-10-02&endDate=2026-10-02`,
+      { token: token1 }
+    );
+    assert(
+      filterCalRes.status === 200 &&
+        filterCalRes.data.data.days.length === 1 &&
+        filterCalRes.data.data.days[0].date === '2026-10-02' &&
+        filterCalRes.data.data.events.every((e: any) => e.date === '2026-10-02'),
+      'GET /api/trips/:id/calendar filters events within startDate and endDate'
+    );
+
+    // 90. GET /api/trips/:id/calendar with invalid date range (startDate > endDate) -> 400
+    const invalidRangeCal = await request(
+      `/api/trips/${trip1Id}/calendar?startDate=2026-10-10&endDate=2026-10-02`,
+      { token: token1 }
+    );
+    assert(invalidRangeCal.status === 400, 'GET /api/trips/:id/calendar with startDate > endDate returns 400');
+
+    // 91. GET /api/trips/:id/calendar with invalid date string -> 400
+    const invalidDateCal = await request(
+      `/api/trips/${trip1Id}/calendar?startDate=not-a-date`,
+      { token: token1 }
+    );
+    assert(invalidDateCal.status === 400, 'GET /api/trips/:id/calendar with invalid date string returns 400');
+
+    // 92. GET /api/trips/:id/timeline without token -> 401
+    const unauthTimeline = await request(`/api/trips/${trip1Id}/timeline`);
+    assert(unauthTimeline.status === 401, 'GET /api/trips/:id/timeline without token returns 401');
+
+    // 93. GET /api/trips/:id/timeline for non-owner -> 403
+    const nonOwnerTimeline = await request(`/api/trips/${trip1Id}/timeline`, { token: token2 });
+    assert(nonOwnerTimeline.status === 403, 'GET /api/trips/:id/timeline for non-owner returns 403');
+
+    // 94. GET /api/trips/:id/timeline for invalid trip -> 404
+    const invalidTripTimeline = await request(`/api/trips/6a895d6d57d038761b987eee/timeline`, { token: token1 });
+    assert(invalidTripTimeline.status === 404, 'GET /api/trips/:id/timeline for non-existent trip returns 404');
+
+    // 95. GET /api/trips/:id/timeline returns chronological combined items -> 200
+    const getTimelineRes = await request(`/api/trips/${trip1Id}/timeline`, { token: token1 });
+    assert(
+      getTimelineRes.status === 200 &&
+        getTimelineRes.data.success === true &&
+        getTimelineRes.data.data.timeline.length >= 4 &&
+        getTimelineRes.data.data.timeline[0].itemType === 'STOP',
+      'GET /api/trips/:id/timeline returns combined chronological events (Stops + Sections)'
+    );
+
+    // 96. Timeline item schema and sorting validation
+    const timelineItems = getTimelineRes.data.data.timeline;
+    const isSorted = timelineItems.every((item: any, i: number) => {
+      if (i === 0) return true;
+      return item.date >= timelineItems[i - 1].date;
+    });
+    assert(
+      isSorted &&
+        timelineItems.some((item: any) => item.itemType === 'STOP' && item.city) &&
+        timelineItems.some((item: any) => item.itemType === 'SECTION' && item.type === 'ACTIVITY'),
+      'Timeline items are strictly chronological and contain full metadata (type, city, activity, cost)'
+    );
+
+    // 97. GET /api/trips/:id/timeline with date filtering -> 200
+    const filterTimelineRes = await request(
+      `/api/trips/${trip1Id}/timeline?startDate=2026-10-02&endDate=2026-10-03`,
+      { token: token1 }
+    );
+    assert(
+      filterTimelineRes.status === 200 &&
+        filterTimelineRes.data.data.timeline.length >= 3 &&
+        filterTimelineRes.data.data.timeline.every((item: any) => item.date >= '2026-10-02' && item.date <= '2026-10-03'),
+      'GET /api/trips/:id/timeline filters timeline items within specified date bounds'
+    );
+
+    // 98. GET /api/trips/:id/timeline with invalid date range -> 400
+    const invalidRangeTimeline = await request(
+      `/api/trips/${trip1Id}/timeline?startDate=2026-10-08&endDate=2026-10-02`,
+      { token: token1 }
+    );
+    assert(invalidRangeTimeline.status === 400, 'GET /api/trips/:id/timeline with startDate > endDate returns 400');
+
+    // 99. Complete Itinerary hierarchy validation (GET /api/trips/:id/itinerary)
+    const completeItineraryRes = await request(`/api/trips/${trip1Id}/itinerary`, { token: token1 });
+    assert(
+      completeItineraryRes.status === 200 &&
+        completeItineraryRes.data.data.stops.length >= 1 &&
+        completeItineraryRes.data.data.stops.some(
+          (s: any) => s.city && s.sections.length >= 3 && s.sections[0].title
+        ),
+      'GET /api/trips/:id/itinerary delivers complete hierarchical Trip -> Stop -> Section structure'
+    );
+
     console.log(`\n============================================================`);
     console.log(`TEST SUMMARY: ${passedTests} passed, ${failedTests} failed`);
     console.log(`============================================================\n`);
@@ -1100,3 +1286,4 @@ async function runTests() {
 }
 
 runTests();
+

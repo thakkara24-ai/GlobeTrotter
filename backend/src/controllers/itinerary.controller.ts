@@ -7,6 +7,7 @@ import {
   createSectionSchema,
   updateSectionSchema,
   reorderSectionsSchema,
+  dateRangeQuerySchema,
 } from '../validators/itinerary.validator';
 
 /**
@@ -26,6 +27,54 @@ export const getItinerary = async (
     res.json({
       success: true,
       data: itinerary,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/trips/:id/calendar
+ */
+export const getCalendar = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const userId = req.user!._id.toString();
+    const tripId = req.params.id as string;
+    const query = dateRangeQuerySchema.parse(req.query);
+
+    const calendar = await itineraryService.getCalendar(tripId, userId, query);
+
+    res.json({
+      success: true,
+      data: calendar,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/trips/:id/timeline
+ */
+export const getTimeline = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const userId = req.user!._id.toString();
+    const tripId = req.params.id as string;
+    const query = dateRangeQuerySchema.parse(req.query);
+
+    const timeline = await itineraryService.getTimeline(tripId, userId, query);
+
+    res.json({
+      success: true,
+      data: timeline,
     });
   } catch (error) {
     next(error);

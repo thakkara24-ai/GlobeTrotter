@@ -179,9 +179,35 @@ export const reorderSectionsSchema = z.object({
     .min(1, 'sectionIds must contain at least one section ID'),
 });
 
+export const dateRangeQuerySchema = z
+  .object({
+    startDate: z
+      .string()
+      .refine((val) => !isNaN(Date.parse(val)), { message: 'Invalid startDate format' })
+      .optional(),
+    endDate: z
+      .string()
+      .refine((val) => !isNaN(Date.parse(val)), { message: 'Invalid endDate format' })
+      .optional(),
+  })
+  .refine(
+    (data) => {
+      if (data.startDate && data.endDate) {
+        return new Date(data.startDate) <= new Date(data.endDate);
+      }
+      return true;
+    },
+    {
+      message: 'Start date cannot be after end date',
+      path: ['endDate'],
+    }
+  );
+
 export type CreateStopInput = z.infer<typeof createStopSchema>;
 export type UpdateStopInput = z.infer<typeof updateStopSchema>;
 export type ReorderStopsInput = z.infer<typeof reorderStopsSchema>;
 export type CreateSectionInput = z.infer<typeof createSectionSchema>;
 export type UpdateSectionInput = z.infer<typeof updateSectionSchema>;
 export type ReorderSectionsInput = z.infer<typeof reorderSectionsSchema>;
+export type DateRangeQuery = z.infer<typeof dateRangeQuerySchema>;
+

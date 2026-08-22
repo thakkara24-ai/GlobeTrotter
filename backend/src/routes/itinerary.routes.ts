@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { authenticate } from '../middleware/auth.middleware';
 import {
   getItinerary,
+  getCalendar,
+  getTimeline,
   createStop,
   updateStop,
   deleteStop,
@@ -21,6 +23,16 @@ router.use(authenticate);
  * GET /api/trips/:id/itinerary — Get full trip itinerary
  */
 router.get('/:id/itinerary', getItinerary);
+
+/**
+ * GET /api/trips/:id/calendar — Get calendar day-by-day events
+ */
+router.get('/:id/calendar', getCalendar);
+
+/**
+ * GET /api/trips/:id/timeline — Get unified chronological timeline
+ */
+router.get('/:id/timeline', getTimeline);
 
 /**
  * POST /api/trips/:id/stops — Create a new stop

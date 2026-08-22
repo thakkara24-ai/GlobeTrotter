@@ -9,6 +9,7 @@ import {
   UpdateStopInput,
   CreateSectionInput,
   UpdateSectionInput,
+  DateRangeQuery,
 } from '../validators/itinerary.validator';
 
 /**
@@ -577,6 +578,238 @@ class ItineraryService {
       .sort({ order: 1 });
 
     return reordered.map(formatSectionObject);
+  }
+
+  /**
+   * GET /api/trips/:id/calendar
+   * Returns itinerary items grouped chronologically by date for a calendar UI.
+   */
+  async getCalendar(tripId: string, userId: string, query?: DateRangeQuery) {
+    const trip = await this.verifyTripOwnership(tripId, userId);
+
+    // Fetch ordered stops
+    const stops = await TripStop.find({ tripId })
+      .populate('cityId', 'name country countryCode description image latitude longitude timezone tags')
+      .sort({ order: 1 });
+
+    const stopMap = new Map<string, any>();
+    for (const stop of stops) {
+      stopMap.set(stop._id.toString(), formatStopObject(stop));
+    }
+
+    // Build section filter
+    const sectionFilter: Record<string, any> = { tripId };
+    if (query?.startDate || query?.endDate) {
+      const dateFilter: Record<string, any> = {};
+      if (query.startDate) {
+        dateFilter.$gte = new Date(query.startDate);
+      }
+      if (query.endDate) {
+        dateFilter.$lte = new Date(query.endDate);
+      }
+      sectionFilter.date = dateFilter;
+    }
+
+    const sections = await ItinerarySection.find(sectionFilter)
+      .populate('activityId', 'name description category estimatedCost currency durationMinutes image tags')
+      .sort({ date: 1, startTime: 1, order: 1 });
+
+    // Group sections by ISO date string (YYYY-MM-DD)
+    const daysMap = new Map<string, any[]>();
+    const events: any[] = [];
+
+    for (const section of sections) {
+      const formattedSection = formatSectionObject(section);
+      const stopObj = stopMap.get(section.stopId.toString());
+      const dateStr = new Date(section.date).toISOString().split('T')[0];
+
+      const eventItem = {
+        _id: formattedSection._id,
+        sectionId: formattedSection._id,
+        title: formattedSection.title,
+        type: formattedSection.type,
+        description: formattedSection.description || '',
+        date: dateStr,
+        startTime: formattedSection.startTime || null,
+        endTime: formattedSection.endTime || null,
+        estimatedCost: formattedSection.estimatedCost || 0,
+        order: formattedSection.order,
+        stop: stopObj
+          ? {
+              _id: stopObj._id,
+              order: stopObj.order,
+              startDate: stopObj.startDate,
+              endDate: stopObj.endDate,
+            }
+          : null,
+        city: stopObj?.city || null,
+        activity: formattedSection.activity || null,
+      };
+
+      if (!daysMap.has(dateStr)) {
+        daysMap.set(dateStr, []);
+      }
+      daysMap.get(dateStr)!.push(eventItem);
+      events.push(eventItem);
+    }
+
+    const days = Array.from(daysMap.entries()).map(([date, items]) => {
+      // Find active stops for this date
+      const activeStops = stops
+        .filter((s) => isDateWithinRange(date, s.startDate, s.endDate))
+        .map((s) => formatStopObject(s));
+
+      return {
+        date,
+        stops: activeStops,
+        items,
+      };
+    });
+
+    return {
+      trip: {
+        _id: trip._id,
+        title: trip.title,
+        description: trip.description,
+        startDate: trip.startDate,
+        endDate: trip.endDate,
+        coverImage: trip.coverImage,
+        status: trip.status,
+      },
+      days,
+      events,
+    };
+  }
+
+  /**
+   * GET /api/trips/:id/timeline
+   * Returns chronological itinerary events combining stops and sections.
+   */
+  async getTimeline(tripId: string, userId: string, query?: DateRangeQuery) {
+    const trip = await this.verifyTripOwnership(tripId, userId);
+
+    // Fetch ordered stops
+    const stops = await TripStop.find({ tripId })
+      .populate('cityId', 'name country countryCode description image latitude longitude timezone tags')
+      .sort({ order: 1 });
+
+    const stopMap = new Map<string, any>();
+    for (const stop of stops) {
+      stopMap.set(stop._id.toString(), formatStopObject(stop));
+    }
+
+    // Build section filter
+    const sectionFilter: Record<string, any> = { tripId };
+    if (query?.startDate || query?.endDate) {
+      const dateFilter: Record<string, any> = {};
+      if (query.startDate) {
+        dateFilter.$gte = new Date(query.startDate);
+      }
+      if (query.endDate) {
+        dateFilter.$lte = new Date(query.endDate);
+      }
+      sectionFilter.date = dateFilter;
+    }
+
+    const sections = await ItinerarySection.find(sectionFilter)
+      .populate('activityId', 'name description category estimatedCost currency durationMinutes image tags')
+      .sort({ date: 1, startTime: 1, order: 1 });
+
+    const timelineItems: any[] = [];
+
+    // Add Stop milestones
+    for (const stop of stops) {
+      const formattedStop = formatStopObject(stop);
+      const startDateStr = new Date(stop.startDate).toISOString().split('T')[0];
+
+      // Check if stop falls within query date filter
+      let includeStop = true;
+      if (query?.startDate && startDateStr < query.startDate) {
+        includeStop = false;
+      }
+      if (query?.endDate && startDateStr > query.endDate) {
+        includeStop = false;
+      }
+
+      if (includeStop) {
+        timelineItems.push({
+          id: formattedStop._id,
+          itemType: 'STOP',
+          type: 'STOP',
+          date: startDateStr,
+          startDate: formattedStop.startDate,
+          endDate: formattedStop.endDate,
+          startTime: null,
+          endTime: null,
+          title: `Stay in ${formattedStop.city?.name || 'City'}`,
+          description: `Stop ${formattedStop.order}: ${formattedStop.city?.name || 'City'}, ${formattedStop.city?.country || ''}`,
+          city: formattedStop.city || null,
+          activity: null,
+          cost: 0,
+          order: formattedStop.order,
+          stopId: formattedStop._id,
+        });
+      }
+    }
+
+    // Add Section events
+    for (const section of sections) {
+      const formattedSection = formatSectionObject(section);
+      const stopObj = stopMap.get(section.stopId.toString());
+      const dateStr = new Date(section.date).toISOString().split('T')[0];
+
+      timelineItems.push({
+        id: formattedSection._id,
+        itemType: 'SECTION',
+        type: formattedSection.type,
+        date: dateStr,
+        startTime: formattedSection.startTime || null,
+        endTime: formattedSection.endTime || null,
+        title: formattedSection.title,
+        description: formattedSection.description || '',
+        city: stopObj?.city || null,
+        activity: formattedSection.activity || null,
+        cost: formattedSection.estimatedCost || 0,
+        order: formattedSection.order,
+        stopId: formattedSection.stopId,
+      });
+    }
+
+    // Sort timeline chronologically by date, then itemType (STOP first), then startTime / order
+    timelineItems.sort((a, b) => {
+      if (a.date !== b.date) {
+        return a.date.localeCompare(b.date);
+      }
+      // If same date, STOP comes before SECTION
+      if (a.itemType !== b.itemType) {
+        return a.itemType === 'STOP' ? -1 : 1;
+      }
+      // If both have startTime, sort by startTime
+      if (a.startTime && b.startTime) {
+        if (a.startTime !== b.startTime) {
+          return a.startTime.localeCompare(b.startTime);
+        }
+      } else if (a.startTime && !b.startTime) {
+        return -1;
+      } else if (!a.startTime && b.startTime) {
+        return 1;
+      }
+      // Fallback to order
+      return (a.order || 0) - (b.order || 0);
+    });
+
+    return {
+      trip: {
+        _id: trip._id,
+        title: trip.title,
+        description: trip.description,
+        startDate: trip.startDate,
+        endDate: trip.endDate,
+        coverImage: trip.coverImage,
+        status: trip.status,
+      },
+      timeline: timelineItems,
+    };
   }
 }
 

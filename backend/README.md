@@ -83,10 +83,12 @@ npm test        # Run comprehensive test suite
 | PUT    | `/api/trips/:id`     | Required | Update trip (ownership verified) |
 | DELETE | `/api/trips/:id`     | Required | Delete trip (ownership verified) |
 
-### Itinerary Builder (Stops & Sections)
+### Itinerary, Calendar & Timeline (Phase 3 & Phase 5)
 | Method | Endpoint             | Auth     | Description            |
 | ------ | -------------------- | -------- | ---------------------- |
-| GET    | `/api/trips/:id/itinerary` | Required | Get complete structured trip itinerary |
+| GET    | `/api/trips/:id/itinerary` | Required | Complete hierarchical itinerary (Trip → Stops → Sections) |
+| GET    | `/api/trips/:id/calendar` | Required | Day-by-day calendar schedule (`?startDate=&endDate=`) |
+| GET    | `/api/trips/:id/timeline` | Required | Chronological combined events timeline (`?startDate=&endDate=`) |
 | POST   | `/api/trips/:id/stops` | Required | Add a city stop to a trip |
 | PUT    | `/api/trips/:id/stops/reorder` | Required | Reorder stops sequentially (`{ stopIds: [...] }`) |
 | PUT    | `/api/trips/:id/stops/:stopId` | Required | Update stop dates, city, or order |
