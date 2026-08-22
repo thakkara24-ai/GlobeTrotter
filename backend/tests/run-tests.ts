@@ -2218,6 +2218,460 @@ async function runTests() {
     });
     assert(budgetDailyReg.status === 200, 'Regression: GET /api/trips/:tripId/budget/daily returns 200');
 
+    // -------------------------------------------------------------
+    // SECTION 13: Phase 8 Profile & Community
+    // -------------------------------------------------------------
+    console.log('\n--- Section 13: Phase 8 Profile & Community ---');
+
+    // 190. GET /api/profile without token -> 401
+    const unauthProfile = await request('/api/profile');
+    assert(unauthProfile.status === 401, 'GET /api/profile without token returns 401');
+
+    // 191. GET /api/profile returns safe user profile
+    const profileRes = await request('/api/profile', { token: token1 });
+    assert(
+      profileRes.status === 200 &&
+        profileRes.data.success === true &&
+        profileRes.data.data.name === 'Phase2 User1' &&
+        !profileRes.data.data.passwordHash,
+      'GET /api/profile returns safe user information without passwordHash'
+    );
+
+    // 192. PUT /api/profile updates valid fields
+    const updateProfileRes = await request('/api/profile', {
+      method: 'PUT',
+      token: token1,
+      body: {
+        name: 'Test User 1',
+        username: 'globetrotter_user1',
+        bio: 'Passionate travel photographer and adventurer',
+        location: 'San Francisco, CA',
+        country: 'United States',
+        travelInterests: ['hiking', 'photography', 'food'],
+        preferredTravelStyle: 'comfortable',
+      },
+    });
+    assert(
+      updateProfileRes.status === 200 &&
+        updateProfileRes.data.data.name === 'Test User 1' &&
+        updateProfileRes.data.data.username === 'globetrotter_user1' &&
+        updateProfileRes.data.data.bio === 'Passionate travel photographer and adventurer' &&
+        updateProfileRes.data.data.preferredTravelStyle === 'comfortable',
+      'PUT /api/profile updates valid profile fields'
+    );
+
+    // 193. Invalid username rejected (contains spaces or invalid characters)
+    const invalidUsernameRes = await request('/api/profile', {
+      method: 'PUT',
+      token: token1,
+      body: {
+        username: 'invalid user name!',
+      },
+    });
+    assert(
+      invalidUsernameRes.status === 400,
+      'PUT /api/profile with invalid username format returns 400'
+    );
+
+    // 194. Duplicate username rejected (User 2 tries to take User 1's username)
+    const duplicateUsernameRes = await request('/api/profile', {
+      method: 'PUT',
+      token: token2,
+      body: {
+        username: 'globetrotter_user1',
+      },
+    });
+    assert(
+      duplicateUsernameRes.status === 409,
+      'PUT /api/profile with duplicate username returns 409 Conflict'
+    );
+
+    // Setup username for User 2 as well
+    await request('/api/profile', {
+      method: 'PUT',
+      token: token2,
+      body: {
+        username: 'explorer_user2',
+        bio: 'Backpacker & cultural explorer',
+      },
+    });
+
+    // 195. PasswordHash never exposed in profile update response
+    assert(
+      !('passwordHash' in updateProfileRes.data.data),
+      'passwordHash is never exposed in profile responses'
+    );
+
+    // 196. GET /api/users/:username returns public profile
+    const publicProfileRes = await request('/api/users/globetrotter_user1');
+    assert(
+      publicProfileRes.status === 200 &&
+        publicProfileRes.data.success === true &&
+        publicProfileRes.data.data.username === 'globetrotter_user1' &&
+        publicProfileRes.data.data.name === 'Test User 1' &&
+        publicProfileRes.data.data.bio === 'Passionate travel photographer and adventurer',
+      'GET /api/users/:username returns public user profile'
+    );
+
+    // 197. GET /api/users/:username for unknown user -> 404
+    const notFoundUserRes = await request('/api/users/non_existent_user_9999');
+    assert(
+      notFoundUserRes.status === 404,
+      'GET /api/users/:username for unknown user returns 404'
+    );
+
+    // 198. Private fields not exposed in public profile
+    const publicUserData = publicProfileRes.data.data;
+    assert(
+      !('passwordHash' in publicUserData) &&
+        !('email' in publicUserData) &&
+        !('role' in publicUserData) &&
+        !('languagePreference' in publicUserData),
+      'Public profile does not expose private email, passwordHash, role, or preferences'
+    );
+
+    // 199. Unauthenticated POST /api/community/posts -> 401
+    const unauthPostRes = await request('/api/community/posts', {
+      method: 'POST',
+      body: {
+        content: 'Exploring the beauty of Rajasthan!',
+      },
+    });
+    assert(unauthPostRes.status === 401, 'Unauthenticated POST /api/community/posts returns 401');
+
+    // 200. Valid post creation by User 1
+    const createPostRes = await request('/api/community/posts', {
+      method: 'POST',
+      token: token1,
+      body: {
+        content: 'Exploring the historical wonders of Delhi and the Pink City! #travel #heritage #india',
+        cityId: cityId,
+        tags: ['travel', 'heritage', 'india'],
+        images: ['https://example.com/photos/redfort.jpg'],
+      },
+    });
+    assert(
+      createPostRes.status === 201 &&
+        createPostRes.data.success === true &&
+        createPostRes.data.data.author.username === 'globetrotter_user1' &&
+        createPostRes.data.data.tags.includes('heritage') &&
+        createPostRes.data.data.likeCount === 0 &&
+        createPostRes.data.data.commentCount === 0,
+      'POST /api/community/posts creates post with populated author and normalized tags'
+    );
+    const post1Id = createPostRes.data.data._id;
+
+    // 201. Post creation with non-existent city -> 404
+    const invalidCityPost = await request('/api/community/posts', {
+      method: 'POST',
+      token: token1,
+      body: {
+        content: 'Post with fake city',
+        cityId: '6a895d6d57d038761b987eee',
+      },
+    });
+    assert(invalidCityPost.status === 404, 'POST /api/community/posts with non-existent city returns 404');
+
+    // 202. Post creation with empty content -> 400
+    const emptyPostRes = await request('/api/community/posts', {
+      method: 'POST',
+      token: token1,
+      body: {
+        content: '',
+      },
+    });
+    assert(emptyPostRes.status === 400, 'POST /api/community/posts with empty content returns 400');
+
+    // 203. Public GET /api/community/posts lists posts with pagination
+    const listPostsRes = await request('/api/community/posts?page=1&limit=10');
+    assert(
+      listPostsRes.status === 200 &&
+        Array.isArray(listPostsRes.data.data) &&
+        listPostsRes.data.data.length >= 1 &&
+        listPostsRes.data.pagination.page === 1,
+      'GET /api/community/posts lists posts with pagination metadata'
+    );
+
+    // 204. Filter posts by tag
+    const tagFilterRes = await request('/api/community/posts?tag=heritage');
+    assert(
+      tagFilterRes.status === 200 &&
+        tagFilterRes.data.data.length >= 1 &&
+        tagFilterRes.data.data.every((p: any) => p.tags.includes('heritage')),
+      'GET /api/community/posts?tag=heritage filters posts by tag'
+    );
+
+    // 205. Filter posts by search query
+    const searchPostRes = await request('/api/community/posts?search=Rajasthan');
+    assert(
+      searchPostRes.status === 200,
+      'GET /api/community/posts?search=... performs search query'
+    );
+
+    // 206. GET /api/community/posts/:postId returns single post detail
+    const getPostRes = await request(`/api/community/posts/${post1Id}`);
+    assert(
+      getPostRes.status === 200 &&
+        getPostRes.data.data._id === post1Id &&
+        getPostRes.data.data.author.name === 'Test User 1',
+      'GET /api/community/posts/:postId returns post detail with populated author'
+    );
+
+    // 207. GET non-existent post -> 404
+    const notFoundPostRes = await request('/api/community/posts/6a895d6d57d038761b987eee');
+    assert(notFoundPostRes.status === 404, 'GET /api/community/posts/:postId for non-existent post returns 404');
+
+    // 208. Author can update own post
+    const updatePostRes = await request(`/api/community/posts/${post1Id}`, {
+      method: 'PUT',
+      token: token1,
+      body: {
+        content: 'Updated post: An unforgettable journey across Northern India! #adventure',
+        tags: ['adventure', 'india'],
+      },
+    });
+    assert(
+      updatePostRes.status === 200 &&
+        updatePostRes.data.data.tags.includes('adventure'),
+      'Author can update own post content and tags'
+    );
+
+    // 209. Non-author cannot update post -> 403
+    const forbiddenUpdatePost = await request(`/api/community/posts/${post1Id}`, {
+      method: 'PUT',
+      token: token2,
+      body: {
+        content: 'Malicious update attempt',
+      },
+    });
+    assert(
+      forbiddenUpdatePost.status === 403,
+      'Non-author cannot update another user post (403)'
+    );
+
+    // 210. Non-author cannot delete post -> 403
+    const forbiddenDeletePost = await request(`/api/community/posts/${post1Id}`, {
+      method: 'DELETE',
+      token: token2,
+    });
+    assert(
+      forbiddenDeletePost.status === 403,
+      'Non-author cannot delete another user post (403)'
+    );
+
+    // 211. Create a throwaway post to test deletion
+    const throwawayPost = await request('/api/community/posts', {
+      method: 'POST',
+      token: token1,
+      body: { content: 'Temporary post to be deleted' },
+    });
+    const throwawayPostId = throwawayPost.data.data._id;
+    const deletePostRes = await request(`/api/community/posts/${throwawayPostId}`, {
+      method: 'DELETE',
+      token: token1,
+    });
+    assert(deletePostRes.status === 200, 'Author can delete own post (200)');
+
+    // 212. Deleted post returns 404
+    const checkDeletedPost = await request(`/api/community/posts/${throwawayPostId}`);
+    assert(checkDeletedPost.status === 404, 'Deleted post returns 404 on subsequent lookup');
+
+    // 213. Authenticated user can like a post
+    const like1Res = await request(`/api/community/posts/${post1Id}/like`, {
+      method: 'POST',
+      token: token1,
+    });
+    assert(
+      like1Res.status === 200 &&
+        like1Res.data.data.liked === true &&
+        like1Res.data.data.likeCount === 1,
+      'POST /api/community/posts/:postId/like increments likeCount to 1'
+    );
+
+    // 214. Duplicate like by same user is idempotent
+    const duplicateLikeRes = await request(`/api/community/posts/${post1Id}/like`, {
+      method: 'POST',
+      token: token1,
+    });
+    assert(
+      duplicateLikeRes.status === 200 &&
+        duplicateLikeRes.data.data.likeCount === 1,
+      'Duplicate like by same user is idempotent and maintains likeCount'
+    );
+
+    // 215. User 2 likes the post -> likeCount becomes 2
+    const like2Res = await request(`/api/community/posts/${post1Id}/like`, {
+      method: 'POST',
+      token: token2,
+    });
+    assert(
+      like2Res.status === 200 &&
+        like2Res.data.data.likeCount === 2,
+      'Second user likes post, likeCount increments to 2'
+    );
+
+    // 216. Unlike post (User 1 unlikes -> likeCount becomes 1)
+    const unlikeRes = await request(`/api/community/posts/${post1Id}/like`, {
+      method: 'DELETE',
+      token: token1,
+    });
+    assert(
+      unlikeRes.status === 200 &&
+        unlikeRes.data.data.liked === false &&
+        unlikeRes.data.data.likeCount === 1,
+      'DELETE /api/community/posts/:postId/like decrements likeCount to 1'
+    );
+
+    // 217. Like without authentication returns 401
+    const unauthLikeRes = await request(`/api/community/posts/${post1Id}/like`, {
+      method: 'POST',
+    });
+    assert(unauthLikeRes.status === 401, 'Liking post without token returns 401');
+
+    // 218. Authenticated user (User 2) creates comment on post
+    const comment1Res = await request(`/api/community/posts/${post1Id}/comments`, {
+      method: 'POST',
+      token: token2,
+      body: {
+        content: 'Amazing itinerary! What was your favorite food spot in Delhi?',
+      },
+    });
+    assert(
+      comment1Res.status === 201 &&
+        comment1Res.data.success === true &&
+        comment1Res.data.data.author.username === 'explorer_user2',
+      'POST /api/community/posts/:postId/comments creates comment with populated author'
+    );
+    const comment1Id = comment1Res.data.data._id;
+
+    // Verify post's commentCount incremented
+    const postAfterComment = await request(`/api/community/posts/${post1Id}`);
+    assert(
+      postAfterComment.data.data.commentCount === 1,
+      'Post commentCount incremented to 1'
+    );
+
+    // 219. Unauthenticated comment creation -> 401
+    const unauthCommentRes = await request(`/api/community/posts/${post1Id}/comments`, {
+      method: 'POST',
+      body: { content: 'Unauth comment' },
+    });
+    assert(unauthCommentRes.status === 401, 'Creating comment without token returns 401');
+
+    // 220. Empty comment rejected -> 400
+    const emptyCommentRes = await request(`/api/community/posts/${post1Id}/comments`, {
+      method: 'POST',
+      token: token2,
+      body: { content: '' },
+    });
+    assert(emptyCommentRes.status === 400, 'Creating empty comment returns 400');
+
+    // 221. GET /api/community/posts/:postId/comments lists comments
+    const listCommentsRes = await request(`/api/community/posts/${post1Id}/comments`);
+    assert(
+      listCommentsRes.status === 200 &&
+        Array.isArray(listCommentsRes.data.data) &&
+        listCommentsRes.data.data.length === 1 &&
+        listCommentsRes.data.data[0].content.includes('favorite food spot'),
+      'GET /api/community/posts/:postId/comments lists comments on post'
+    );
+
+    // 222. Comment author (User 2) can update own comment
+    const updateCommentRes = await request(
+      `/api/community/posts/${post1Id}/comments/${comment1Id}`,
+      {
+        method: 'PUT',
+        token: token2,
+        body: {
+          content: 'Updated comment: Truly incredible photos and itinerary!',
+        },
+      }
+    );
+    assert(
+      updateCommentRes.status === 200 &&
+        updateCommentRes.data.data.content === 'Updated comment: Truly incredible photos and itinerary!',
+      'Comment author can update own comment'
+    );
+
+    // 223. Non-author cannot update comment -> 403
+    const forbiddenUpdateComment = await request(
+      `/api/community/posts/${post1Id}/comments/${comment1Id}`,
+      {
+        method: 'PUT',
+        token: token1,
+        body: { content: 'Unauthorized comment edit' },
+      }
+    );
+    assert(
+      forbiddenUpdateComment.status === 403,
+      'Non-author cannot update comment (403)'
+    );
+
+    // 224. Non-author cannot delete comment -> 403
+    const forbiddenDeleteComment = await request(
+      `/api/community/posts/${post1Id}/comments/${comment1Id}`,
+      {
+        method: 'DELETE',
+        token: token1,
+      }
+    );
+    assert(
+      forbiddenDeleteComment.status === 403,
+      'Non-author cannot delete comment (403)'
+    );
+
+    // 225. Comment author can delete own comment -> 200
+    const deleteCommentRes = await request(
+      `/api/community/posts/${post1Id}/comments/${comment1Id}`,
+      {
+        method: 'DELETE',
+        token: token2,
+      }
+    );
+    assert(deleteCommentRes.status === 200, 'Comment author can delete own comment (200)');
+
+    // 226. Post commentCount decrements correctly after comment deletion
+    const postAfterCommentDel = await request(`/api/community/posts/${post1Id}`);
+    assert(
+      postAfterCommentDel.data.data.commentCount === 0,
+      'Post commentCount decrements to 0 after comment deletion'
+    );
+
+    // 227. GET /api/community/feed returns feed
+    const feedRes = await request('/api/community/feed?page=1&limit=10');
+    assert(
+      feedRes.status === 200 &&
+        Array.isArray(feedRes.data.data) &&
+        feedRes.data.data.length >= 1,
+      'GET /api/community/feed returns community feed'
+    );
+
+    // 228. GET /api/community/users returns active public users
+    const usersDiscoveryRes = await request('/api/community/users');
+    assert(
+      usersDiscoveryRes.status === 200 &&
+        Array.isArray(usersDiscoveryRes.data.data) &&
+        usersDiscoveryRes.data.data.some((u: any) => u.username === 'globetrotter_user1'),
+      'GET /api/community/users returns discovery user list'
+    );
+
+    // 229. GET /api/community/tags returns popular tags with count
+    const tagsDiscoveryRes = await request('/api/community/tags');
+    assert(
+      tagsDiscoveryRes.status === 200 &&
+        Array.isArray(tagsDiscoveryRes.data.data) &&
+        tagsDiscoveryRes.data.data.some((t: any) => t.tag === 'adventure' || t.tag === 'india'),
+      'GET /api/community/tags returns popular tags with post counts'
+    );
+
+    // 230. Privacy guard: check that no passwords or emails leak in feed or tags
+    const rawFeedJson = JSON.stringify(feedRes.data);
+    assert(
+      !rawFeedJson.includes('passwordHash') &&
+        !rawFeedJson.includes('testuser1@example.com'),
+      'Community feed does not leak passwordHash or private user email'
+    );
+
     console.log(`\n============================================================`);
     console.log(`TEST SUMMARY: ${passedTests} passed, ${failedTests} failed`);
     console.log(`============================================================\n`);

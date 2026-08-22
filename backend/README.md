@@ -134,6 +134,31 @@ npm test        # Run comprehensive test suite
 | PUT    | `/api/activities/:id/location` | Required | Update activity coordinates (`latitude`, `longitude`) |
 | GET    | `/api/trips/:id/map` | Required | Get trip map markers and route intelligence |
 
+### Profile & Public User (Phase 8)
+| Method | Endpoint             | Auth     | Description            |
+| ------ | -------------------- | -------- | ---------------------- |
+| GET    | `/api/profile`       | Required | Get authenticated user full profile |
+| PUT    | `/api/profile`       | Required | Update user profile (`name`, `username`, `bio`, `location`, `country`, `travelInterests`, `preferredTravelStyle`, `avatar`) |
+| GET    | `/api/users/:username` | Public | Get public user profile (sanitized, zero credentials/private data) |
+
+### Community Posts, Likes, Comments & Feed (Phase 8)
+| Method | Endpoint             | Auth     | Description            |
+| ------ | -------------------- | -------- | ---------------------- |
+| GET    | `/api/community/feed` | Public  | Get recent community post feed (`?page=&limit=&city=&tag=&search=`) |
+| GET    | `/api/community/users` | Public | Discover active public community users |
+| GET    | `/api/community/tags` | Public  | Discover popular community tags with post counts |
+| POST   | `/api/community/posts` | Required | Create a new community post (`content`, `images`, `tags`, `cityId`, `tripId`) |
+| GET    | `/api/community/posts` | Public | List posts with pagination and search/city/tag filters |
+| GET    | `/api/community/posts/:postId` | Public | Get detailed post with populated author and city |
+| PUT    | `/api/community/posts/:postId` | Required (Author) | Update post content, images, and tags |
+| DELETE | `/api/community/posts/:postId` | Required (Author) | Delete post with cascading deletion of likes and comments |
+| POST   | `/api/community/posts/:postId/like` | Required | Like a post (idempotent, prevents duplicate likes) |
+| DELETE | `/api/community/posts/:postId/like` | Required | Unlike a post |
+| POST   | `/api/community/posts/:postId/comments` | Required | Add a comment to a post |
+| GET    | `/api/community/posts/:postId/comments` | Public | List comments on a post with pagination |
+| PUT    | `/api/community/posts/:postId/comments/:commentId` | Required (Author) | Update comment content |
+| DELETE | `/api/community/posts/:postId/comments/:commentId` | Required (Author) | Delete comment and decrement post comment count |
+
 ## Architecture & Data Models
 
 ```
@@ -178,7 +203,10 @@ Routes → Controllers → Services → Models → MongoDB
     - `LOW`: Baseline estimation without prior user spending history.
 
 ### Models
-- **`User`**: User accounts, credentials (passwordHash select: false), preferences.
+- **`User`**: User accounts, credentials (passwordHash select: false), username, bio, location, travel interests, and public profile export.
+- **`CommunityPost`**: Public travel posts with author, content, images, tags, optional city/trip references, likeCount, and commentCount.
+- **`PostLike`**: Compound indexed user likes on community posts (`{ post: 1, user: 1 }` unique).
+- **`PostComment`**: User comments on community posts with author reference and post timestamp indexing.
 - **`TripCollaborator`**: User-trip collaboration relationships with role enum (`VIEWER`, `EDITOR`) and compound unique index.
 - **`Trip`**: High-level trip containers with budget configuration (`totalBudget`, `currency`), traveler count (`travelers`), and public share configuration (`publicShareEnabled`, `publicShareToken`).
 - **`City`**: Geographical destination metadata, GeoJSON `location`, 2dsphere index, text search indexes on name & country.
@@ -189,10 +217,13 @@ Routes → Controllers → Services → Models → MongoDB
 
 ### Validation & Relationship Rules
 - **Trip Ownership & Collaboration:** Every trip, itinerary, map, and expense action strictly validates effective role (`OWNER`, `EDITOR`, `VIEWER`). Non-collaborators receive `403 Forbidden`.
+- **Post & Comment Ownership:** Only post/comment authors can update or delete their respective content.
+- **Cascading Deletes:**
+  - Deleting a `TripStop` removes all child `ItinerarySection` records.
+  - Deleting a `CommunityPost` cascades and removes all child `PostLike` and `PostComment` records.
 - **Date Hierarchy:** `Trip.startDate <= Trip.endDate`, `Stop.startDate <= Stop.endDate`, and `Section.date` must fall within `[Stop.startDate, Stop.endDate]`.
 - **Date Shrinking Safety:** Updating a stop's date range is rejected if existing itinerary sections fall outside the proposed range.
 - **City-Activity Integrity:** When attaching an activity to an itinerary section, the system validates that the activity belongs to the stop's city.
-- **Cascading Deletes:** Deleting a `TripStop` automatically removes all child `ItinerarySection` records.
 - **Expense Integrity:** An expense must belong to the user's trip, have an `amount > 0`, and a valid category.
 - **Coordinates:** Latitudes must fall within `[-90, 90]` and Longitudes within `[-180, 180]`.
 
