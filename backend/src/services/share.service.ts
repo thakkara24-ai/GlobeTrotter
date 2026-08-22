@@ -19,7 +19,6 @@ export interface PublicItineraryResponse {
     startDate: Date;
     endDate: Date;
     order: number;
-    notes?: string;
     city: {
       _id: string;
       name: string;
@@ -35,13 +34,11 @@ export interface PublicItineraryResponse {
       _id: string;
       title: string;
       type: string;
-      date: string;
+      description?: string;
+      date: Date;
       startTime?: string;
       endTime?: string;
-      durationMinutes?: number;
       estimatedCost?: number;
-      currency?: string;
-      notes?: string;
       order: number;
       activity: {
         _id: string;
@@ -100,7 +97,7 @@ class ShareService {
     );
 
     trip.publicShareEnabled = false;
-    trip.publicShareToken = null;
+    trip.publicShareToken = undefined;
     await trip.save();
   }
 
@@ -159,13 +156,11 @@ class ShareService {
             _id: s._id.toString(),
             title: s.title,
             type: s.type,
+            description: s.description,
             date: s.date,
             startTime: s.startTime,
             endTime: s.endTime,
-            durationMinutes: s.durationMinutes,
             estimatedCost: s.estimatedCost,
-            currency: s.currency,
-            notes: s.notes,
             order: s.order,
             activity: actObj
               ? {
@@ -189,7 +184,6 @@ class ShareService {
         startDate: stop.startDate,
         endDate: stop.endDate,
         order: stop.order,
-        notes: stop.notes,
         city: cityObj
           ? {
               _id: cityObj._id.toString(),

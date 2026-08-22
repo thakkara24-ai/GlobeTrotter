@@ -12,6 +12,7 @@ import Trip from '../src/models/Trip';
 import TripStop from '../src/models/TripStop';
 import ItinerarySection from '../src/models/ItinerarySection';
 import Expense from '../src/models/Expense';
+import TripCollaborator from '../src/models/TripCollaborator';
 
 const PORT = 5002;
 let server: Server;
@@ -30,30 +31,34 @@ async function request(
     token?: string;
   } = {}
 ): Promise<ApiResponse> {
-  const url = `${baseUrl}${endpoint}`;
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-
+  const headers: Record<string, string> = {};
+  if (options.body) {
+    headers['Content-Type'] = 'application/json';
+  }
   if (options.token) {
     headers['Authorization'] = `Bearer ${options.token}`;
   }
 
-  const res = await fetch(url, {
+  const url = `${baseUrl}${endpoint}`;
+  const fetchOptions: RequestInit = {
     method: options.method || 'GET',
     headers,
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  });
+  };
+  if (options.body) {
+    fetchOptions.body = JSON.stringify(options.body);
+  }
 
+  const response = await fetch(url, fetchOptions);
   let data: any;
+  const text = await response.text();
   try {
-    data = await res.json();
+    data = JSON.parse(text);
   } catch {
-    data = null;
+    data = text;
   }
 
   return {
-    status: res.status,
+    status: response.status,
     data,
   };
 }
@@ -61,15 +66,12 @@ async function request(
 let passedTests = 0;
 let failedTests = 0;
 
-function assert(condition: boolean, testName: string, errorDetails?: any) {
+function assert(condition: boolean, message: string) {
   if (condition) {
-    console.log(`  ✅ PASS: ${testName}`);
+    console.log(`  ✅ PASS: ${message}`);
     passedTests++;
   } else {
-    console.error(`  ❌ FAIL: ${testName}`);
-    if (errorDetails) {
-      console.error('     Details:', JSON.stringify(errorDetails, null, 2));
-    }
+    console.error(`  ❌ FAIL: ${message}`);
     failedTests++;
   }
 }
@@ -80,10 +82,24 @@ async function runTests() {
     server = app.listen(PORT);
     console.log(`\n================ STARTING FULL BACKEND TEST SUITE ================\n`);
 
-    // Clean up previous test users, trips, stops, sections, and expenses
-    await User.deleteMany({ email: { $in: ['p2user1@example.com', 'p2user2@example.com'] } });
+    // Clean up previous test users, trips, stops, sections, collaborators, and expenses
+    await User.deleteMany({
+      email: {
+        $in: [
+          'p2user1@example.com',
+          'p2user2@example.com',
+          'collaborator@example.com',
+          'unrelated@example.com',
+          'testuser1@example.com',
+          'testuser2@example.com',
+        ],
+      },
+    });
     await Trip.deleteMany({ title: { $regex: /Test Trip/i } });
     await Expense.deleteMany({});
+    await TripCollaborator.deleteMany({});
+    await Trip.syncIndexes();
+    await TripCollaborator.syncIndexes();
 
     // -------------------------------------------------------------
     // SECTION 1: Phase 1 Regression (Health + Auth)
@@ -1420,6 +1436,491 @@ async function runTests() {
         getMapRes.data.data.markers.some((m: any) => m.type === 'STOP' && m.coordinates) &&
         getMapRes.data.data.markers.some((m: any) => m.type === 'ACTIVITY' && m.coordinates),
       'GET /api/trips/:id/map returns trip map data with stop and activity markers'
+    );
+
+    // -------------------------------------------------------------
+    // SECTION 9: Trip Collaboration CRUD & Validation
+    // -------------------------------------------------------------
+    console.log('\n--- Section 9: Trip Collaboration CRUD & Validation ---');
+
+    // Register User 3 (Editor/Viewer) and User 4 (Unrelated)
+    const user3Reg = await request('/api/auth/register', {
+      method: 'POST',
+      body: {
+        name: 'Collaborator User',
+        email: 'collaborator@example.com',
+        password: 'CollabPassword123!',
+        confirmPassword: 'CollabPassword123!',
+      },
+    });
+    const user3 = user3Reg.data.data.user;
+    const token3 = user3Reg.data.data.token;
+
+    const user4Reg = await request('/api/auth/register', {
+      method: 'POST',
+      body: {
+        name: 'Unrelated User',
+        email: 'unrelated@example.com',
+        password: 'UnrelatedPassword123!',
+        confirmPassword: 'UnrelatedPassword123!',
+      },
+    });
+    const user4 = user4Reg.data.data.user;
+    const token4 = user4Reg.data.data.token;
+
+    // 116. POST /api/trips/:tripId/collaborators without token -> 401
+    const unauthAddCollab = await request(`/api/trips/${trip1Id}/collaborators`, {
+      method: 'POST',
+      body: { email: 'collaborator@example.com', role: 'VIEWER' },
+    });
+    assert(unauthAddCollab.status === 401, 'POST collaborator without token returns 401');
+
+    // 117. POST /api/trips/:tripId/collaborators by non-owner -> 403
+    const nonOwnerAddCollab = await request(`/api/trips/${trip1Id}/collaborators`, {
+      method: 'POST',
+      token: token2,
+      body: { email: 'collaborator@example.com', role: 'VIEWER' },
+    });
+    assert(nonOwnerAddCollab.status === 403, 'POST collaborator by non-owner returns 403');
+
+    // 118. POST /api/trips/:tripId/collaborators with non-existent user -> 404
+    const notFoundUserCollab = await request(`/api/trips/${trip1Id}/collaborators`, {
+      method: 'POST',
+      token: token1,
+      body: { email: 'nonexistent@example.com', role: 'VIEWER' },
+    });
+    assert(notFoundUserCollab.status === 404, 'POST non-existent user returns 404');
+
+    // 119. POST /api/trips/:tripId/collaborators adding owner themselves -> 400
+    const ownerAddSelf = await request(`/api/trips/${trip1Id}/collaborators`, {
+      method: 'POST',
+      token: token1,
+      body: { email: 'p2user1@example.com', role: 'VIEWER' },
+    });
+    assert(ownerAddSelf.status === 400, 'Owner cannot add themselves as collaborator');
+
+    // 120. POST /api/trips/:tripId/collaborators with invalid role -> 400
+    const invalidRoleCollab = await request(`/api/trips/${trip1Id}/collaborators`, {
+      method: 'POST',
+      token: token1,
+      body: { email: 'collaborator@example.com', role: 'SUPER_ADMIN' },
+    });
+    assert(invalidRoleCollab.status === 400, 'POST collaborator with invalid role returns 400');
+
+    // 121. POST /api/trips/:tripId/collaborators by owner adding User 2 as VIEWER -> 201
+    const addCollab2Res = await request(`/api/trips/${trip1Id}/collaborators`, {
+      method: 'POST',
+      token: token1,
+      body: { email: 'p2user2@example.com', role: 'VIEWER' },
+    });
+    assert(
+      addCollab2Res.status === 201 &&
+        addCollab2Res.data.success === true &&
+        addCollab2Res.data.data.collaborator.role === 'VIEWER' &&
+        addCollab2Res.data.data.collaborator.user.email === 'p2user2@example.com' &&
+        !addCollab2Res.data.data.collaborator.user.passwordHash,
+      'POST collaborator by owner creates VIEWER collaborator without passwordHash'
+    );
+    const collab2Id = addCollab2Res.data.data.collaborator._id;
+
+    // 122. POST duplicate collaborator -> 409
+    const dupCollabRes = await request(`/api/trips/${trip1Id}/collaborators`, {
+      method: 'POST',
+      token: token1,
+      body: { email: 'p2user2@example.com', role: 'VIEWER' },
+    });
+    assert(dupCollabRes.status === 409, 'POST duplicate collaborator returns 409 Conflict');
+
+    // 123. POST /api/trips/:tripId/collaborators adding User 3 as EDITOR -> 201
+    const addCollab3Res = await request(`/api/trips/${trip1Id}/collaborators`, {
+      method: 'POST',
+      token: token1,
+      body: { userId: user3._id, role: 'EDITOR' },
+    });
+    assert(
+      addCollab3Res.status === 201 &&
+        addCollab3Res.data.data.collaborator.role === 'EDITOR',
+      'POST collaborator by owner creates EDITOR collaborator using userId'
+    );
+    const collab3Id = addCollab3Res.data.data.collaborator._id;
+
+    // 124. GET /api/trips/:tripId/collaborators without token -> 401
+    const unauthGetCollabs = await request(`/api/trips/${trip1Id}/collaborators`);
+    assert(unauthGetCollabs.status === 401, 'GET collaborators without token returns 401');
+
+    // 125. GET /api/trips/:tripId/collaborators by unrelated user -> 403
+    const unrelatedGetCollabs = await request(`/api/trips/${trip1Id}/collaborators`, {
+      token: token4,
+    });
+    assert(unrelatedGetCollabs.status === 403, 'GET collaborators by unrelated user returns 403');
+
+    // 126. GET /api/trips/:tripId/collaborators by owner -> 200
+    const ownerGetCollabs = await request(`/api/trips/${trip1Id}/collaborators`, {
+      token: token1,
+    });
+    assert(
+      ownerGetCollabs.status === 200 &&
+        ownerGetCollabs.data.data.collaborators.length === 2 &&
+        ownerGetCollabs.data.data.collaborators.every((c: any) => !c.user.passwordHash),
+      'GET collaborators by owner returns 2 collaborators without passwordHash'
+    );
+
+    // 127. GET /api/trips/:tripId/collaborators by collaborator -> 200
+    const collabGetCollabs = await request(`/api/trips/${trip1Id}/collaborators`, {
+      token: token2,
+    });
+    assert(
+      collabGetCollabs.status === 200 &&
+        collabGetCollabs.data.data.collaborators.length === 2,
+      'GET collaborators by collaborator returns collaborator list'
+    );
+
+    // 128. PUT /api/trips/:tripId/collaborators/:id by non-owner -> 403
+    const nonOwnerUpdateCollab = await request(
+      `/api/trips/${trip1Id}/collaborators/${collab2Id}`,
+      {
+        method: 'PUT',
+        token: token2,
+        body: { role: 'EDITOR' },
+      }
+    );
+    assert(nonOwnerUpdateCollab.status === 403, 'PUT collaborator role by non-owner returns 403');
+
+    // 129. PUT /api/trips/:tripId/collaborators/:id by owner -> 200
+    const ownerUpdateCollab = await request(
+      `/api/trips/${trip1Id}/collaborators/${collab2Id}`,
+      {
+        method: 'PUT',
+        token: token1,
+        body: { role: 'EDITOR' },
+      }
+    );
+    assert(
+      ownerUpdateCollab.status === 200 &&
+        ownerUpdateCollab.data.data.collaborator.role === 'EDITOR',
+      'PUT collaborator role by owner updates role to EDITOR'
+    );
+
+    // 130. DELETE /api/trips/:tripId/collaborators/:id by non-owner -> 403
+    const nonOwnerDeleteCollab = await request(
+      `/api/trips/${trip1Id}/collaborators/${collab2Id}`,
+      {
+        method: 'DELETE',
+        token: token2,
+      }
+    );
+    assert(nonOwnerDeleteCollab.status === 403, 'DELETE collaborator by non-owner returns 403');
+
+    // 131. DELETE /api/trips/:tripId/collaborators/:id by owner -> 200
+    const ownerDeleteCollab = await request(
+      `/api/trips/${trip1Id}/collaborators/${collab2Id}`,
+      {
+        method: 'DELETE',
+        token: token1,
+      }
+    );
+    assert(
+      ownerDeleteCollab.status === 200 &&
+        ownerDeleteCollab.data.success === true,
+      'DELETE collaborator by owner removes collaborator'
+    );
+
+    // 132. Removed collaborator immediately loses access to trip itinerary -> 403
+    const removedCollabAccess = await request(`/api/trips/${trip1Id}/itinerary`, {
+      token: token2,
+    });
+    assert(
+      removedCollabAccess.status === 403,
+      'Removed collaborator immediately loses access to trip itinerary (403)'
+    );
+
+    // -------------------------------------------------------------
+    // SECTION 10: Collaborator Permissions (VIEWER vs EDITOR vs OWNER)
+    // -------------------------------------------------------------
+    console.log('\n--- Section 10: Collaborator Permissions (VIEWER vs EDITOR) ---');
+
+    // Add User 2 back as VIEWER
+    const reAddCollab2 = await request(`/api/trips/${trip1Id}/collaborators`, {
+      method: 'POST',
+      token: token1,
+      body: { email: 'p2user2@example.com', role: 'VIEWER' },
+    });
+    assert(reAddCollab2.status === 201, 'Re-add User 2 as VIEWER');
+
+    // Owner creates a fresh stop for collaboration tests
+    const collabStopRes = await request(`/api/trips/${trip1Id}/stops`, {
+      method: 'POST',
+      token: token1,
+      body: {
+        cityId: cityId,
+        startDate: '2026-10-01',
+        endDate: '2026-10-05',
+      },
+    });
+    const collabStopId = collabStopRes.data.data.stop._id;
+
+    // 133. VIEWER can GET itinerary -> 200
+    const viewerItinerary = await request(`/api/trips/${trip1Id}/itinerary`, {
+      token: token2,
+    });
+    assert(viewerItinerary.status === 200, 'VIEWER can view trip itinerary');
+
+    // 134. VIEWER can GET calendar -> 200
+    const viewerCalendar = await request(`/api/trips/${trip1Id}/calendar`, {
+      token: token2,
+    });
+    assert(viewerCalendar.status === 200, 'VIEWER can view trip calendar');
+
+    // 135. VIEWER can GET timeline -> 200
+    const viewerTimeline = await request(`/api/trips/${trip1Id}/timeline`, {
+      token: token2,
+    });
+    assert(viewerTimeline.status === 200, 'VIEWER can view trip timeline');
+
+    // 136. VIEWER can GET map -> 200
+    const viewerMap = await request(`/api/trips/${trip1Id}/map`, {
+      token: token2,
+    });
+    assert(viewerMap.status === 200, 'VIEWER can view trip map');
+
+    // 137. VIEWER cannot create a stop -> 403
+    const viewerCreateStop = await request(`/api/trips/${trip1Id}/stops`, {
+      method: 'POST',
+      token: token2,
+      body: {
+        cityId: cityId,
+        startDate: '2026-10-15',
+        endDate: '2026-10-18',
+      },
+    });
+    assert(viewerCreateStop.status === 403, 'VIEWER cannot create stops (403)');
+
+    // 138. VIEWER cannot modify stop -> 403
+    const viewerUpdateStop = await request(
+      `/api/trips/${trip1Id}/stops/${collabStopId}`,
+      {
+        method: 'PUT',
+        token: token2,
+        body: { notes: 'Viewer trying to edit' },
+      }
+    );
+    assert(viewerUpdateStop.status === 403, 'VIEWER cannot update stops (403)');
+
+    // 139. VIEWER cannot create section -> 403
+    const viewerCreateSec = await request(
+      `/api/trips/${trip1Id}/stops/${collabStopId}/sections`,
+      {
+        method: 'POST',
+        token: token2,
+        body: {
+          title: 'Viewer Section',
+          type: 'ACTIVITY',
+          date: '2026-10-02',
+        },
+      }
+    );
+    assert(viewerCreateSec.status === 403, 'VIEWER cannot create itinerary sections (403)');
+
+    // 140. VIEWER cannot reorder stops -> 403
+    const viewerReorder = await request(`/api/trips/${trip1Id}/stops/reorder`, {
+      method: 'PUT',
+      token: token2,
+      body: { stopIds: [collabStopId] },
+    });
+    assert(viewerReorder.status === 403, 'VIEWER cannot reorder stops (403)');
+
+    // 141. VIEWER cannot manage collaborators -> 403
+    const viewerAddOther = await request(`/api/trips/${trip1Id}/collaborators`, {
+      method: 'POST',
+      token: token2,
+      body: { email: 'unrelated@example.com', role: 'VIEWER' },
+    });
+    assert(viewerAddOther.status === 403, 'VIEWER cannot manage collaborators (403)');
+
+    // 142. EDITOR (User 3) can create an itinerary section -> 200/201
+    const editorCreateSec = await request(
+      `/api/trips/${trip1Id}/stops/${collabStopId}/sections`,
+      {
+        method: 'POST',
+        token: token3,
+        body: {
+          title: 'Editor Created Section',
+          type: 'ACTIVITY',
+          date: '2026-10-02',
+          activityId: sampleActivity._id,
+        },
+      }
+    );
+    assert(
+      (editorCreateSec.status === 201 || editorCreateSec.status === 200) &&
+        editorCreateSec.data.success === true &&
+        editorCreateSec.data.data.section.title === 'Editor Created Section',
+      'EDITOR can create itinerary sections'
+    );
+    const editorSecId = editorCreateSec.data.data.section._id;
+
+    // 143. EDITOR can update an itinerary section -> 200
+    const editorUpdateSec = await request(
+      `/api/trips/${trip1Id}/stops/${collabStopId}/sections/${editorSecId}`,
+      {
+        method: 'PUT',
+        token: token3,
+        body: { title: 'Editor Updated Title' },
+      }
+    );
+    assert(
+      editorUpdateSec.status === 200 &&
+        editorUpdateSec.data.data.section.title === 'Editor Updated Title',
+      'EDITOR can update itinerary sections'
+    );
+
+    // 144. EDITOR can delete an itinerary section -> 200
+    const editorDeleteSec = await request(
+      `/api/trips/${trip1Id}/stops/${collabStopId}/sections/${editorSecId}`,
+      {
+        method: 'DELETE',
+        token: token3,
+      }
+    );
+    assert(editorDeleteSec.status === 200, 'EDITOR can delete itinerary sections');
+
+    // 145. EDITOR cannot manage collaborators -> 403
+    const editorAddOther = await request(`/api/trips/${trip1Id}/collaborators`, {
+      method: 'POST',
+      token: token3,
+      body: { email: 'unrelated@example.com', role: 'VIEWER' },
+    });
+    assert(editorAddOther.status === 403, 'EDITOR cannot add collaborators (403)');
+
+    // 146. Unrelated user (User 4) cannot access shared trip itinerary -> 403
+    const unrelatedTripAccess = await request(`/api/trips/${trip1Id}/itinerary`, {
+      token: token4,
+    });
+    assert(unrelatedTripAccess.status === 403, 'Unrelated user cannot access shared trip (403)');
+
+    // -------------------------------------------------------------
+    // SECTION 11: Public Itinerary Sharing & Security
+    // -------------------------------------------------------------
+    console.log('\n--- Section 11: Public Itinerary Sharing & Security ---');
+
+    // 147. Enable public sharing without token -> 401
+    const unauthEnableShare = await request(`/api/trips/${trip1Id}/share/public`, {
+      method: 'POST',
+    });
+    assert(unauthEnableShare.status === 401, 'Enable public sharing without token returns 401');
+
+    // 148. Enable public sharing by non-owner (Editor User 3) -> 403
+    const nonOwnerEnableShare = await request(`/api/trips/${trip1Id}/share/public`, {
+      method: 'POST',
+      token: token3,
+    });
+    assert(nonOwnerEnableShare.status === 403, 'Enable public sharing by non-owner returns 403');
+
+    // Create a scheduled activity section on the stop for public viewing
+    await request(`/api/trips/${trip1Id}/stops/${collabStopId}/sections`, {
+      method: 'POST',
+      token: token1,
+      body: {
+        title: 'Public Sightseeing Section',
+        type: 'ACTIVITY',
+        date: '2026-10-02',
+        activityId: sampleActivity._id,
+      },
+    });
+
+    // 149. Owner enables public sharing -> 200
+    const enableShareRes = await request(`/api/trips/${trip1Id}/share/public`, {
+      method: 'POST',
+      token: token1,
+    });
+    assert(
+      enableShareRes.status === 200 &&
+        enableShareRes.data.success === true &&
+        enableShareRes.data.data.enabled === true &&
+        typeof enableShareRes.data.data.shareToken === 'string' &&
+        enableShareRes.data.data.shareToken.length > 20,
+      'Owner enables public sharing and receives cryptographically secure token'
+    );
+    const publicToken = enableShareRes.data.data.shareToken;
+
+    // 150. GET /api/public/trips/:shareToken without authentication -> 200
+    const publicItineraryRes = await request(`/api/public/trips/${publicToken}`);
+    assert(
+      publicItineraryRes.status === 200 &&
+        publicItineraryRes.data.success === true &&
+        publicItineraryRes.data.data.trip &&
+        publicItineraryRes.data.data.trip.title &&
+        publicItineraryRes.data.data.stops.length >= 1,
+      'Public itinerary endpoint works without authentication (200)'
+    );
+
+    // 151. Public response contains stops and nested sections with cities and activities
+    const pubData = publicItineraryRes.data.data;
+    const targetStop = pubData.stops.find((s: any) => s._id === collabStopId) || pubData.stops[0];
+    assert(
+      targetStop.city &&
+        targetStop.city.name &&
+        targetStop.sections.length >= 1 &&
+        targetStop.sections[0].title === 'Public Sightseeing Section' &&
+        targetStop.sections[0].activity &&
+        targetStop.sections[0].activity.name,
+      'Public response contains populated stops, cities, and scheduled activity sections'
+    );
+
+    // 152. Public response security: NO passwordHash
+    const rawJson = JSON.stringify(pubData);
+    assert(!rawJson.includes('passwordHash'), 'Public response does not expose passwordHash');
+
+    // 153. Public response security: NO user private email
+    assert(!rawJson.includes('p2user1@example.com'), 'Public response does not expose private email');
+
+    // 154. Public response security: NO expenses
+    assert(!rawJson.includes('totalSpent') && !pubData.expenses, 'Public response does not expose expenses');
+
+    // 155. Public response security: NO budget
+    assert(!pubData.trip.budget && !pubData.budget, 'Public response does not expose budget information');
+
+    // 156. GET /api/public/trips with invalid token -> 404
+    const invalidTokenRes = await request('/api/public/trips/invalid-random-token-12345');
+    assert(invalidTokenRes.status === 404, 'GET public itinerary with invalid token returns 404');
+
+    // 157. Disable public sharing by owner -> 200
+    const disableShareRes = await request(`/api/trips/${trip1Id}/share/public`, {
+      method: 'DELETE',
+      token: token1,
+    });
+    assert(
+      disableShareRes.status === 200 &&
+        disableShareRes.data.success === true,
+      'Owner disables public sharing and revokes token'
+    );
+
+    // 158. Revoked public token immediately returns 404
+    const revokedTokenRes = await request(`/api/public/trips/${publicToken}`);
+    assert(
+      revokedTokenRes.status === 404,
+      'Revoked public token returns 404 immediately'
+    );
+
+    // 159. Re-enable public sharing generates valid token
+    const reEnableShareRes = await request(`/api/trips/${trip1Id}/share/public`, {
+      method: 'POST',
+      token: token1,
+    });
+    assert(
+      reEnableShareRes.status === 200 &&
+        reEnableShareRes.data.data.enabled === true &&
+        typeof reEnableShareRes.data.data.shareToken === 'string',
+      'Re-enabling public sharing returns valid share token'
+    );
+    const newPublicToken = reEnableShareRes.data.data.shareToken;
+
+    // 160. GET public itinerary works with re-enabled token
+    const rePublicRes = await request(`/api/public/trips/${newPublicToken}`);
+    assert(
+      rePublicRes.status === 200 &&
+        rePublicRes.data.data.trip.title,
+      'Public itinerary accessible after re-enabling'
     );
 
     console.log(`\n============================================================`);

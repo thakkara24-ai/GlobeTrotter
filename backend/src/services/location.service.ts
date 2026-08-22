@@ -5,6 +5,7 @@ import Trip, { ITrip } from '../models/Trip';
 import TripStop from '../models/TripStop';
 import ItinerarySection from '../models/ItinerarySection';
 import { calculateHaversineDistance } from '../utils/distance';
+import collaboratorService from './collaborator.service';
 
 export interface NearbyCityResult {
   city: any;
@@ -282,24 +283,11 @@ class LocationService {
    * Retrieves map markers and route intelligence for a trip.
    */
   async getTripMapData(tripId: string, userId: string) {
-    if (!mongoose.Types.ObjectId.isValid(tripId)) {
-      const error = new Error('Invalid trip ID');
-      (error as any).statusCode = 400;
-      throw error;
-    }
-
-    const trip = await Trip.findById(tripId);
-    if (!trip) {
-      const error = new Error('Trip not found');
-      (error as any).statusCode = 404;
-      throw error;
-    }
-
-    if (trip.user.toString() !== userId) {
-      const error = new Error('You do not have permission to access this trip');
-      (error as any).statusCode = 403;
-      throw error;
-    }
+    const { trip } = await collaboratorService.requireTripAccess(
+      tripId,
+      userId,
+      'VIEWER'
+    );
 
     // Fetch ordered stops
     const stops = await TripStop.find({ tripId })

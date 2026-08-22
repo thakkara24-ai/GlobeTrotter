@@ -107,6 +107,21 @@ npm test        # Run comprehensive test suite
 | GET    | `/api/trips/:tripId/budget/daily` | Required | Chronological daily spending totals |
 | POST   | `/api/trips/:tripId/expenses` | Required | Create an expense on a trip |
 | GET    | `/api/trips/:tripId/expenses` | Required | List expenses with pagination & category/date filters |
+### Trip Collaboration & Permissions (Phase 6)
+| Method | Endpoint             | Auth     | Description            |
+| ------ | -------------------- | -------- | ---------------------- |
+| POST   | `/api/trips/:tripId/collaborators` | Required (Owner) | Add collaborator by email or userId (`VIEWER` or `EDITOR`) |
+| GET    | `/api/trips/:tripId/collaborators` | Required (Collaborators) | List all collaborators for a trip |
+| PUT    | `/api/trips/:tripId/collaborators/:collaboratorId` | Required (Owner) | Update collaborator role (`VIEWER` <-> `EDITOR`) |
+| DELETE | `/api/trips/:tripId/collaborators/:collaboratorId` | Required (Owner) | Remove collaborator from trip |
+
+### Public Itinerary Sharing (Phase 6)
+| Method | Endpoint             | Auth     | Description            |
+| ------ | -------------------- | -------- | ---------------------- |
+| POST   | `/api/trips/:tripId/share/public` | Required (Owner) | Enable public sharing and generate secure shareToken |
+| DELETE | `/api/trips/:tripId/share/public` | Required (Owner) | Disable public sharing and revoke shareToken |
+| GET    | `/api/public/trips/:shareToken` | Public (No Auth) | Public read-only itinerary (sanitized, no private data) |
+
 ### Location, Geolocation & Maps (Phase 6)
 | Method | Endpoint             | Auth     | Description            |
 | ------ | -------------------- | -------- | ---------------------- |
@@ -123,6 +138,12 @@ npm test        # Run comprehensive test suite
 Routes → Controllers → Services → Models → MongoDB
 ```
 
+### Authorization & Permission Hierarchy
+- **`OWNER`**: Full access to trip metadata, collaborator management, public sharing settings, budget, expenses, and itinerary CRUD.
+- **`EDITOR`**: Read/write access to trip itinerary (create/update/delete stops and sections, reordering, calendar, timeline, map). Cannot manage collaborators, budget, or expenses.
+- **`VIEWER`**: Read-only access to trip itinerary, calendar, timeline, map, and collaborator list. Cannot modify any trip or itinerary data.
+- **`PUBLIC`**: Read-only access to sanitized trip itinerary via `GET /api/public/trips/:shareToken`. Sensitive data (passwords, emails, user profile, budget, expenses, collaborators) is never exposed.
+
 ### Geolocation & GeoJSON Conventions
 - Standard **GeoJSON Point** format is used for spatial queries:
   ```json
@@ -137,7 +158,10 @@ Routes → Controllers → Services → Models → MongoDB
 
 ### Models
 - **`User`**: User accounts, credentials (passwordHash select: false), preferences.
+- **`TripCollaborator`**: User-trip collaboration relationships with role enum (`VIEWER`, `EDITOR`) and compound unique index.
+- **`Trip`**: High-level trip containers with budget configuration (`totalBudget`, `currency`) and public share configuration (`publicShareEnabled`, `publicShareToken`).
 - **`City`**: Geographical destination metadata, GeoJSON `location`, 2dsphere index, text search indexes on name & country.
+- **`Activity`**: Categorized experiences referencing City with GeoJSON `location` and 2dsphere index.
 - **`Activity`**: Categorized experiences referencing City with GeoJSON `location` and 2dsphere index.
 - **`Trip`**: High-level trip containers with budget configuration (`totalBudget`, `currency`).
 - **`TripStop`**: Ordered city stays inside a trip with start/end date bounds.

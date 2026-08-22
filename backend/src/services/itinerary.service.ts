@@ -4,6 +4,9 @@ import TripStop, { ITripStop } from '../models/TripStop';
 import ItinerarySection, { IItinerarySection } from '../models/ItinerarySection';
 import City from '../models/City';
 import Activity from '../models/Activity';
+import collaboratorService, {
+  EffectiveRole,
+} from './collaborator.service';
 import {
   CreateStopInput,
   UpdateStopInput,
@@ -57,28 +60,18 @@ function formatSectionObject(sectionDoc: any) {
 
 class ItineraryService {
   /**
-   * Helper: Verifies that a trip exists and belongs to the authenticated user.
+   * Helper: Verifies that a trip exists and the user has the required permission level.
    */
-  async verifyTripOwnership(tripId: string, userId: string): Promise<ITrip> {
-    if (!mongoose.Types.ObjectId.isValid(tripId)) {
-      const error = new Error('Invalid trip ID');
-      (error as any).statusCode = 400;
-      throw error;
-    }
-
-    const trip = await Trip.findById(tripId);
-    if (!trip) {
-      const error = new Error('Trip not found');
-      (error as any).statusCode = 404;
-      throw error;
-    }
-
-    if (trip.user.toString() !== userId) {
-      const error = new Error('You do not have permission to access this trip');
-      (error as any).statusCode = 403;
-      throw error;
-    }
-
+  async verifyTripOwnership(
+    tripId: string,
+    userId: string,
+    minRole: EffectiveRole = 'OWNER'
+  ): Promise<ITrip> {
+    const { trip } = await collaboratorService.requireTripAccess(
+      tripId,
+      userId,
+      minRole
+    );
     return trip;
   }
 
@@ -113,7 +106,7 @@ class ItineraryService {
    * Retrieves the full structured itinerary for a trip.
    */
   async getItinerary(tripId: string, userId: string) {
-    const trip = await this.verifyTripOwnership(tripId, userId);
+    const trip = await this.verifyTripOwnership(tripId, userId, 'VIEWER');
 
     // Fetch ordered stops
     const stops = await TripStop.find({ tripId })
@@ -165,7 +158,7 @@ class ItineraryService {
    * Creates a new stop for a trip.
    */
   async createStop(tripId: string, userId: string, data: CreateStopInput): Promise<any> {
-    await this.verifyTripOwnership(tripId, userId);
+    await this.verifyTripOwnership(tripId, userId, 'EDITOR');
 
     // Verify city exists
     const city = await City.findById(data.cityId);
@@ -213,7 +206,7 @@ class ItineraryService {
     userId: string,
     data: UpdateStopInput
   ): Promise<any> {
-    await this.verifyTripOwnership(tripId, userId);
+    await this.verifyTripOwnership(tripId, userId, 'EDITOR');
     const stop = await this.verifyStopBelongsToTrip(stopId, tripId);
 
     const updateFields: Record<string, any> = {};
@@ -293,7 +286,7 @@ class ItineraryService {
    * Deletes a stop and cascades to delete all associated itinerary sections.
    */
   async deleteStop(tripId: string, stopId: string, userId: string): Promise<void> {
-    await this.verifyTripOwnership(tripId, userId);
+    await this.verifyTripOwnership(tripId, userId, 'EDITOR');
     const stop = await this.verifyStopBelongsToTrip(stopId, tripId);
 
     // Cascade delete associated sections
@@ -314,7 +307,7 @@ class ItineraryService {
    * Reorders stops for a trip sequentially based on provided stop IDs.
    */
   async reorderStops(tripId: string, userId: string, stopIds: string[]): Promise<any[]> {
-    await this.verifyTripOwnership(tripId, userId);
+    await this.verifyTripOwnership(tripId, userId, 'EDITOR');
 
     const existingStops = await TripStop.find({ tripId });
     const existingStopIds = new Set(existingStops.map((s) => s._id.toString()));
@@ -356,7 +349,7 @@ class ItineraryService {
     userId: string,
     data: CreateSectionInput
   ): Promise<any> {
-    await this.verifyTripOwnership(tripId, userId);
+    await this.verifyTripOwnership(tripId, userId, 'EDITOR');
     const stop = await this.verifyStopBelongsToTrip(stopId, tripId);
 
     // Validate section date is within stop range
@@ -428,7 +421,7 @@ class ItineraryService {
     userId: string,
     data: UpdateSectionInput
   ): Promise<any> {
-    await this.verifyTripOwnership(tripId, userId);
+    await this.verifyTripOwnership(tripId, userId, 'EDITOR');
     const stop = await this.verifyStopBelongsToTrip(stopId, tripId);
 
     if (!mongoose.Types.ObjectId.isValid(sectionId)) {
@@ -512,7 +505,7 @@ class ItineraryService {
     sectionId: string,
     userId: string
   ): Promise<void> {
-    await this.verifyTripOwnership(tripId, userId);
+    await this.verifyTripOwnership(tripId, userId, 'EDITOR');
     await this.verifyStopBelongsToTrip(stopId, tripId);
 
     if (!mongoose.Types.ObjectId.isValid(sectionId)) {
@@ -547,7 +540,7 @@ class ItineraryService {
     userId: string,
     sectionIds: string[]
   ): Promise<any[]> {
-    await this.verifyTripOwnership(tripId, userId);
+    await this.verifyTripOwnership(tripId, userId, 'EDITOR');
     await this.verifyStopBelongsToTrip(stopId, tripId);
 
     const existingSections = await ItinerarySection.find({ stopId });
@@ -585,7 +578,7 @@ class ItineraryService {
    * Returns itinerary items grouped chronologically by date for a calendar UI.
    */
   async getCalendar(tripId: string, userId: string, query?: DateRangeQuery) {
-    const trip = await this.verifyTripOwnership(tripId, userId);
+    const trip = await this.verifyTripOwnership(tripId, userId, 'VIEWER');
 
     // Fetch ordered stops
     const stops = await TripStop.find({ tripId })
@@ -686,7 +679,7 @@ class ItineraryService {
    * Returns chronological itinerary events combining stops and sections.
    */
   async getTimeline(tripId: string, userId: string, query?: DateRangeQuery) {
-    const trip = await this.verifyTripOwnership(tripId, userId);
+    const trip = await this.verifyTripOwnership(tripId, userId, 'VIEWER');
 
     // Fetch ordered stops
     const stops = await TripStop.find({ tripId })

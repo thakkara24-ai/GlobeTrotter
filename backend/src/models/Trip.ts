@@ -99,7 +99,7 @@ const tripSchema = new Schema<ITrip>(
     },
     publicShareToken: {
       type: String,
-      default: null,
+      default: undefined,
       trim: true,
     },
   },
