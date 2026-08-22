@@ -1,0 +1,45 @@
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+
+// Routes
+import healthRoutes from './routes/health.routes';
+import authRoutes from './routes/auth.routes';
+
+// Middleware
+import { notFoundHandler } from './middleware/notFound.middleware';
+import { errorHandler } from './middleware/error.middleware';
+
+const app = express();
+
+// --------------- Global Middleware ---------------
+
+// Security headers
+app.use(helmet());
+
+// CORS
+app.use(
+  cors({
+    origin: process.env.CLIENT_URL || 'http://localhost:5173',
+    credentials: true,
+  })
+);
+
+// Body parsing
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
+
+// --------------- Routes ---------------
+
+app.use('/api/health', healthRoutes);
+app.use('/api/auth', authRoutes);
+
+// --------------- Error Handling ---------------
+
+// 404 — must come after all routes
+app.use(notFoundHandler);
+
+// Centralized error handler — must be the last middleware
+app.use(errorHandler);
+
+export default app;
