@@ -21,11 +21,13 @@ export const createApp = (): Application => {
 
   // Middleware
   app.use(
-    cors({
-      origin: '*', // Allow all origins for dev/demo flexibility
-      credentials: true,
-    })
-  );
+  cors({
+    origin: 'https://globe-trotter-xnuz.vercel.app',
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  })
+);
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
