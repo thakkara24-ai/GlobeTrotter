@@ -10,6 +10,7 @@ import activityRoutes from './routes/activity.routes';
 import tripRoutes from './routes/trip.routes';
 import itineraryRoutes from './routes/itinerary.routes';
 import expenseRoutes from './routes/expense.routes';
+import locationRoutes from './routes/location.routes';
 
 // Middleware
 import { notFoundHandler } from './middleware/notFound.middleware';
@@ -40,6 +41,7 @@ app.use('/api/health', healthRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/cities', cityRoutes);
 app.use('/api/activities', activityRoutes);
+app.use('/api/location', locationRoutes);
 app.use('/api/trips', expenseRoutes);
 app.use('/api/trips', itineraryRoutes);
 app.use('/api/trips', tripRoutes);

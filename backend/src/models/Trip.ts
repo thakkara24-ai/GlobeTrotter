@@ -23,6 +23,8 @@ export interface ITrip extends Document {
   activities: mongoose.Types.ObjectId[];
   status: TripStatus;
   budget: ITripBudget;
+  publicShareEnabled: boolean;
+  publicShareToken?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -91,6 +93,15 @@ const tripSchema = new Schema<ITrip>(
         maxlength: [3, 'Currency must be a 3-letter code'],
       },
     },
+    publicShareEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    publicShareToken: {
+      type: String,
+      default: null,
+      trim: true,
+    },
   },
   {
     timestamps: true,
@@ -109,6 +120,7 @@ tripSchema.pre('validate', function (next) {
 tripSchema.index({ user: 1, createdAt: -1 });
 tripSchema.index({ startDate: 1 });
 tripSchema.index({ status: 1 });
+tripSchema.index({ publicShareToken: 1 }, { sparse: true, unique: true });
 
 const Trip = mongoose.model<ITrip>('Trip', tripSchema);
 

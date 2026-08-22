@@ -1267,6 +1267,161 @@ async function runTests() {
       'GET /api/trips/:id/itinerary delivers complete hierarchical Trip -> Stop -> Section structure'
     );
 
+    // -------------------------------------------------------------
+    // SECTION 8: Phase 6 Maps, Geolocation & Location Intelligence
+    // -------------------------------------------------------------
+    console.log('\n--- Section 8: Phase 6 Maps, Geolocation & Location Intelligence ---');
+
+    // 100. GET /api/location/distance with valid coordinates
+    const distanceRes = await request(
+      '/api/location/distance?fromLatitude=28.6139&fromLongitude=77.2090&toLatitude=26.9124&toLongitude=75.7873'
+    );
+    assert(
+      distanceRes.status === 200 &&
+        distanceRes.data.success === true &&
+        distanceRes.data.data.distanceKilometers > 230 &&
+        distanceRes.data.data.distanceKilometers < 250 &&
+        distanceRes.data.data.calculationType === 'straight-line',
+      'GET /api/location/distance computes accurate straight-line distance between Delhi and Jaipur'
+    );
+
+    // 101. GET /api/location/distance with same coordinates -> 0
+    const zeroDistRes = await request(
+      '/api/location/distance?fromLatitude=28.6139&fromLongitude=77.2090&toLatitude=28.6139&toLongitude=77.2090'
+    );
+    assert(
+      zeroDistRes.status === 200 &&
+        zeroDistRes.data.data.distanceMeters === 0 &&
+        zeroDistRes.data.data.distanceKilometers === 0,
+      'GET /api/location/distance returns 0 for identical coordinates'
+    );
+
+    // 102. GET /api/location/distance with invalid latitude -> 400
+    const invalidDistRes = await request(
+      '/api/location/distance?fromLatitude=95&fromLongitude=77.2090&toLatitude=26.9124&toLongitude=75.7873'
+    );
+    assert(invalidDistRes.status === 400, 'GET /api/location/distance rejects invalid latitude (> 90)');
+
+    // 103. GET /api/cities/nearby with valid coordinates -> 200
+    const nearbyCitiesRes = await request(
+      '/api/cities/nearby?latitude=28.6139&longitude=77.2090&radius=500000'
+    );
+    assert(
+      nearbyCitiesRes.status === 200 &&
+        nearbyCitiesRes.data.success === true &&
+        nearbyCitiesRes.data.data.cities.length >= 1 &&
+        nearbyCitiesRes.data.data.cities[0].city.name === 'Delhi' &&
+        nearbyCitiesRes.data.data.cities[0].distanceKilometers < 5,
+      'GET /api/cities/nearby finds closest city (Delhi) with distance metadata'
+    );
+
+    // 104. GET /api/cities/nearby with invalid coordinates -> 400
+    const invalidNearbyCity = await request(
+      '/api/cities/nearby?latitude=100&longitude=77.2090'
+    );
+    assert(invalidNearbyCity.status === 400, 'GET /api/cities/nearby rejects out-of-range coordinates');
+
+    // 105. GET /api/activities/nearby with valid coordinates -> 200
+    const nearbyActRes = await request(
+      '/api/activities/nearby?latitude=28.6562&longitude=77.2410&radius=50000'
+    );
+    assert(
+      nearbyActRes.status === 200 &&
+        nearbyActRes.data.success === true &&
+        nearbyActRes.data.data.activities.length >= 1 &&
+        nearbyActRes.data.data.activities[0].activity.name === 'Red Fort Tour' &&
+        nearbyActRes.data.data.activities[0].city &&
+        typeof nearbyActRes.data.data.activities[0].distanceMeters === 'number',
+      'GET /api/activities/nearby returns closest activity (Red Fort) with populated city and distance'
+    );
+
+    // 106. GET /api/activities/nearby pagination -> 200
+    const pageNearbyActRes = await request(
+      '/api/activities/nearby?latitude=28.6562&longitude=77.2410&radius=50000&page=1&limit=1'
+    );
+    assert(
+      pageNearbyActRes.status === 200 &&
+        pageNearbyActRes.data.data.activities.length === 1 &&
+        pageNearbyActRes.data.data.pagination.page === 1 &&
+        pageNearbyActRes.data.data.pagination.limit === 1,
+      'GET /api/activities/nearby supports pagination'
+    );
+
+    // 107. GET /api/activities/nearby with negative radius -> 400
+    const invalidRadiusAct = await request(
+      '/api/activities/nearby?latitude=28.6562&longitude=77.2410&radius=-500'
+    );
+    assert(invalidRadiusAct.status === 400, 'GET /api/activities/nearby rejects negative radius');
+
+    // 108. PUT /api/cities/:id/location without token -> 401
+    const unauthCityLoc = await request(`/api/cities/${cityId}/location`, {
+      method: 'PUT',
+      body: { latitude: 28.614, longitude: 77.209 },
+    });
+    assert(unauthCityLoc.status === 401, 'PUT /api/cities/:id/location without token returns 401');
+
+    // 109. PUT /api/cities/:id/location with invalid latitude -> 400
+    const invalidCityLoc = await request(`/api/cities/${cityId}/location`, {
+      method: 'PUT',
+      token: token1,
+      body: { latitude: 120, longitude: 77.209 },
+    });
+    assert(invalidCityLoc.status === 400, 'PUT /api/cities/:id/location rejects latitude > 90');
+
+    // 110. PUT /api/cities/:id/location with valid coordinates -> 200
+    const updateCityLocRes = await request(`/api/cities/${cityId}/location`, {
+      method: 'PUT',
+      token: token1,
+      body: { latitude: 28.6139, longitude: 77.209 },
+    });
+    assert(
+      updateCityLocRes.status === 200 &&
+        updateCityLocRes.data.success === true &&
+        updateCityLocRes.data.data.city.latitude === 28.6139 &&
+        updateCityLocRes.data.data.city.longitude === 77.209 &&
+        updateCityLocRes.data.data.city.location.coordinates[0] === 77.209 &&
+        updateCityLocRes.data.data.city.location.coordinates[1] === 28.6139,
+      'PUT /api/cities/:id/location updates coordinates and GeoJSON location [lon, lat]'
+    );
+
+    // 111. PUT /api/activities/:id/location with valid coordinates -> 200
+    const updateActLocRes = await request(`/api/activities/${sampleActivity._id}/location`, {
+      method: 'PUT',
+      token: token1,
+      body: { latitude: 28.6562, longitude: 77.241 },
+    });
+    assert(
+      updateActLocRes.status === 200 &&
+        updateActLocRes.data.success === true &&
+        updateActLocRes.data.data.activity.latitude === 28.6562 &&
+        updateActLocRes.data.data.activity.location.coordinates[0] === 77.241,
+      'PUT /api/activities/:id/location updates activity coordinates and GeoJSON location'
+    );
+
+    // 112. GET /api/trips/:id/map without token -> 401
+    const unauthMap = await request(`/api/trips/${trip1Id}/map`);
+    assert(unauthMap.status === 401, 'GET /api/trips/:id/map without token returns 401');
+
+    // 113. GET /api/trips/:id/map by non-owner -> 403
+    const nonOwnerMap = await request(`/api/trips/${trip1Id}/map`, { token: token2 });
+    assert(nonOwnerMap.status === 403, 'GET /api/trips/:id/map by non-owner returns 403');
+
+    // 114. GET /api/trips/:id/map for non-existent trip -> 404
+    const invalidTripMap = await request(`/api/trips/6a895d6d57d038761b987eee/map`, { token: token1 });
+    assert(invalidTripMap.status === 404, 'GET /api/trips/:id/map for non-existent trip returns 404');
+
+    // 115. GET /api/trips/:id/map by owner -> 200
+    const getMapRes = await request(`/api/trips/${trip1Id}/map`, { token: token1 });
+    assert(
+      getMapRes.status === 200 &&
+        getMapRes.data.success === true &&
+        getMapRes.data.data.trip._id === trip1Id &&
+        getMapRes.data.data.markers.length >= 2 &&
+        getMapRes.data.data.markers.some((m: any) => m.type === 'STOP' && m.coordinates) &&
+        getMapRes.data.data.markers.some((m: any) => m.type === 'ACTIVITY' && m.coordinates),
+      'GET /api/trips/:id/map returns trip map data with stop and activity markers'
+    );
+
     console.log(`\n============================================================`);
     console.log(`TEST SUMMARY: ${passedTests} passed, ${failedTests} failed`);
     console.log(`============================================================\n`);
@@ -1286,4 +1441,5 @@ async function runTests() {
 }
 
 runTests();
+
 

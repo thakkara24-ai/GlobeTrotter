@@ -1,5 +1,10 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
+export interface IGeoLocation {
+  type: 'Point';
+  coordinates: [number, number]; // [longitude, latitude]
+}
+
 export interface ICity extends Document {
   name: string;
   country: string;
@@ -8,6 +13,7 @@ export interface ICity extends Document {
   image?: string;
   latitude: number;
   longitude: number;
+  location: IGeoLocation;
   timezone: string;
   tags: string[];
   isActive: boolean;
@@ -59,6 +65,18 @@ const citySchema = new Schema<ICity>(
       min: [-180, 'Longitude must be between -180 and 180'],
       max: [180, 'Longitude must be between -180 and 180'],
     },
+    location: {
+      type: {
+        type: String,
+        enum: ['Point'],
+        default: 'Point',
+      },
+      coordinates: {
+        type: [Number], // [longitude, latitude]
+        required: true,
+        default: [0, 0],
+      },
+    },
     timezone: {
       type: String,
       required: [true, 'Timezone is required'],
@@ -78,10 +96,29 @@ const citySchema = new Schema<ICity>(
   }
 );
 
-// Indexes for searchable fields
+// Keep location coordinates and lat/lon synchronized
+citySchema.pre('validate', function (next) {
+  if (this.latitude !== undefined && this.longitude !== undefined) {
+    this.location = {
+      type: 'Point',
+      coordinates: [this.longitude, this.latitude],
+    };
+  } else if (
+    this.location &&
+    Array.isArray(this.location.coordinates) &&
+    this.location.coordinates.length === 2
+  ) {
+    this.longitude = this.location.coordinates[0];
+    this.latitude = this.location.coordinates[1];
+  }
+  next();
+});
+
+// Indexes for searchable and geospatial fields
 citySchema.index({ name: 'text', country: 'text' });
 citySchema.index({ countryCode: 1 });
 citySchema.index({ isActive: 1 });
+citySchema.index({ location: '2dsphere' });
 
 const City = mongoose.model<ICity>('City', citySchema);
 

@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document } from 'mongoose';
+import { IGeoLocation } from './City';
 
 export enum ActivityCategory {
   SIGHTSEEING = 'sightseeing',
@@ -20,6 +21,9 @@ export interface IActivity extends Document {
   currency: string;
   durationMinutes: number;
   image?: string;
+  latitude?: number;
+  longitude?: number;
+  location?: IGeoLocation;
   tags: string[];
   isActive: boolean;
   createdAt: Date;
@@ -72,6 +76,26 @@ const activitySchema = new Schema<IActivity>(
       type: String,
       default: undefined,
     },
+    latitude: {
+      type: Number,
+      min: [-90, 'Latitude must be between -90 and 90'],
+      max: [90, 'Latitude must be between -90 and 90'],
+    },
+    longitude: {
+      type: Number,
+      min: [-180, 'Longitude must be between -180 and 180'],
+      max: [180, 'Longitude must be between -180 and 180'],
+    },
+    location: {
+      type: {
+        type: String,
+        enum: ['Point'],
+        default: 'Point',
+      },
+      coordinates: {
+        type: [Number], // [longitude, latitude]
+      },
+    },
     tags: {
       type: [String],
       default: [],
@@ -86,10 +110,29 @@ const activitySchema = new Schema<IActivity>(
   }
 );
 
+// Keep location coordinates and lat/lon synchronized
+activitySchema.pre('validate', function (next) {
+  if (this.latitude !== undefined && this.longitude !== undefined) {
+    this.location = {
+      type: 'Point',
+      coordinates: [this.longitude, this.latitude],
+    };
+  } else if (
+    this.location &&
+    Array.isArray(this.location.coordinates) &&
+    this.location.coordinates.length === 2
+  ) {
+    this.longitude = this.location.coordinates[0];
+    this.latitude = this.location.coordinates[1];
+  }
+  next();
+});
+
 // Indexes
 activitySchema.index({ city: 1 });
 activitySchema.index({ category: 1 });
 activitySchema.index({ name: 'text', description: 'text' });
+activitySchema.index({ location: '2dsphere' });
 
 const Activity = mongoose.model<IActivity>('Activity', activitySchema);
 

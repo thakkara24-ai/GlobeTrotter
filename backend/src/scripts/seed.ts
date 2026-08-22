@@ -154,6 +154,8 @@ const activitiesByCity: Record<string, Array<{
   estimatedCost: number;
   currency: string;
   durationMinutes: number;
+  latitude: number;
+  longitude: number;
   tags: string[];
 }>> = {
   Delhi: [
@@ -164,6 +166,8 @@ const activitiesByCity: Record<string, Array<{
       estimatedCost: 10,
       currency: 'USD',
       durationMinutes: 120,
+      latitude: 28.6562,
+      longitude: 77.2410,
       tags: ['heritage', 'history', 'photography'],
     },
     {
@@ -173,6 +177,8 @@ const activitiesByCity: Record<string, Array<{
       estimatedCost: 15,
       currency: 'USD',
       durationMinutes: 180,
+      latitude: 28.6506,
+      longitude: 77.2303,
       tags: ['food', 'walking', 'local'],
     },
   ],
@@ -184,6 +190,8 @@ const activitiesByCity: Record<string, Array<{
       estimatedCost: 12,
       currency: 'USD',
       durationMinutes: 180,
+      latitude: 26.9855,
+      longitude: 75.8513,
       tags: ['fort', 'history', 'architecture'],
     },
     {
@@ -193,6 +201,8 @@ const activitiesByCity: Record<string, Array<{
       estimatedCost: 50,
       currency: 'USD',
       durationMinutes: 150,
+      latitude: 26.9200,
+      longitude: 75.8250,
       tags: ['shopping', 'handicrafts', 'local'],
     },
   ],
@@ -204,6 +214,8 @@ const activitiesByCity: Record<string, Array<{
       estimatedCost: 30,
       currency: 'EUR',
       durationMinutes: 120,
+      latitude: 48.8584,
+      longitude: 2.2945,
       tags: ['landmark', 'views', 'photography'],
     },
     {
@@ -213,6 +225,8 @@ const activitiesByCity: Record<string, Array<{
       estimatedCost: 20,
       currency: 'EUR',
       durationMinutes: 240,
+      latitude: 48.8606,
+      longitude: 2.3376,
       tags: ['art', 'museum', 'history'],
     },
   ],
@@ -224,6 +238,8 @@ const activitiesByCity: Record<string, Array<{
       estimatedCost: 40,
       currency: 'USD',
       durationMinutes: 150,
+      latitude: 35.6655,
+      longitude: 139.7708,
       tags: ['food', 'sushi', 'local'],
     },
     {
@@ -233,6 +249,8 @@ const activitiesByCity: Record<string, Array<{
       estimatedCost: 10,
       currency: 'USD',
       durationMinutes: 120,
+      latitude: 35.6595,
+      longitude: 139.7004,
       tags: ['culture', 'fashion', 'photography'],
     },
   ],
@@ -244,6 +262,8 @@ const activitiesByCity: Record<string, Array<{
       estimatedCost: 0,
       currency: 'USD',
       durationMinutes: 120,
+      latitude: 40.7851,
+      longitude: -73.9683,
       tags: ['park', 'nature', 'walking'],
     },
     {
@@ -253,6 +273,8 @@ const activitiesByCity: Record<string, Array<{
       estimatedCost: 120,
       currency: 'USD',
       durationMinutes: 180,
+      latitude: 40.7590,
+      longitude: -73.9845,
       tags: ['theatre', 'entertainment', 'music'],
     },
   ],
@@ -264,6 +286,8 @@ const activitiesByCity: Record<string, Array<{
       estimatedCost: 35,
       currency: 'GBP',
       durationMinutes: 180,
+      latitude: 51.5081,
+      longitude: -0.0759,
       tags: ['history', 'castle', 'crown jewels'],
     },
     {
@@ -273,6 +297,8 @@ const activitiesByCity: Record<string, Array<{
       estimatedCost: 80,
       currency: 'GBP',
       durationMinutes: 180,
+      latitude: 51.5127,
+      longitude: -0.1305,
       tags: ['theatre', 'entertainment'],
     },
   ],
@@ -284,6 +310,8 @@ const activitiesByCity: Record<string, Array<{
       estimatedCost: 45,
       currency: 'USD',
       durationMinutes: 90,
+      latitude: 25.1972,
+      longitude: 55.2744,
       tags: ['landmark', 'views', 'architecture'],
     },
     {
@@ -293,6 +321,8 @@ const activitiesByCity: Record<string, Array<{
       estimatedCost: 70,
       currency: 'USD',
       durationMinutes: 360,
+      latitude: 24.8607,
+      longitude: 55.4382,
       tags: ['adventure', 'desert', 'food'],
     },
   ],
@@ -304,6 +334,8 @@ const activitiesByCity: Record<string, Array<{
       estimatedCost: 30,
       currency: 'AUD',
       durationMinutes: 90,
+      latitude: -33.8568,
+      longitude: 151.2153,
       tags: ['architecture', 'music', 'landmark'],
     },
     {
@@ -313,6 +345,8 @@ const activitiesByCity: Record<string, Array<{
       estimatedCost: 0,
       currency: 'AUD',
       durationMinutes: 150,
+      latitude: -33.8915,
+      longitude: 151.2767,
       tags: ['walking', 'beaches', 'nature'],
     },
   ],
@@ -324,6 +358,8 @@ const activitiesByCity: Record<string, Array<{
       estimatedCost: 25,
       currency: 'EUR',
       durationMinutes: 210,
+      latitude: 41.8902,
+      longitude: 12.4922,
       tags: ['history', 'archaeology', 'landmark'],
     },
     {
@@ -333,6 +369,8 @@ const activitiesByCity: Record<string, Array<{
       estimatedCost: 55,
       currency: 'EUR',
       durationMinutes: 180,
+      latitude: 41.8885,
+      longitude: 12.4690,
       tags: ['food', 'walking', 'local'],
     },
   ],
@@ -344,6 +382,8 @@ const activitiesByCity: Record<string, Array<{
       estimatedCost: 15,
       currency: 'USD',
       durationMinutes: 180,
+      latitude: 13.7500,
+      longitude: 100.4914,
       tags: ['temple', 'history', 'architecture'],
     },
     {
@@ -353,6 +393,8 @@ const activitiesByCity: Record<string, Array<{
       estimatedCost: 30,
       currency: 'USD',
       durationMinutes: 240,
+      latitude: 13.7999,
+      longitude: 100.5501,
       tags: ['shopping', 'food', 'local'],
     },
   ],
@@ -363,13 +405,25 @@ async function seed() {
     await connectDB();
     console.log('Starting seed...');
 
+    // Ensure geospatial indexes are created
+    await City.createIndexes();
+    await Activity.createIndexes();
+
     // Seed cities (upsert by name + country to avoid duplicates)
     const cityDocs: Record<string, mongoose.Types.ObjectId> = {};
 
     for (const cityData of cities) {
       const city = await City.findOneAndUpdate(
         { name: cityData.name, country: cityData.country },
-        { $set: cityData },
+        {
+          $set: {
+            ...cityData,
+            location: {
+              type: 'Point',
+              coordinates: [cityData.longitude, cityData.latitude],
+            },
+          },
+        },
         { upsert: true, new: true }
       );
       cityDocs[cityData.name] = city._id as mongoose.Types.ObjectId;
@@ -389,7 +443,16 @@ async function seed() {
       for (const actData of activities) {
         const act = await Activity.findOneAndUpdate(
           { name: actData.name, city: cityId },
-          { $set: { ...actData, city: cityId } },
+          {
+            $set: {
+              ...actData,
+              city: cityId,
+              location: {
+                type: 'Point',
+                coordinates: [actData.longitude, actData.latitude],
+              },
+            },
+          },
           { upsert: true, new: true }
         );
         activityDocs[actData.name] = act._id as mongoose.Types.ObjectId;

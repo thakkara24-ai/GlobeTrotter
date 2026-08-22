@@ -13,6 +13,7 @@ import {
   deleteSection,
   reorderSections,
 } from '../controllers/itinerary.controller';
+import { getTripMap } from '../controllers/location.controller';
 
 const router = Router({ mergeParams: true });
 
@@ -33,6 +34,11 @@ router.get('/:id/calendar', getCalendar);
  * GET /api/trips/:id/timeline — Get unified chronological timeline
  */
 router.get('/:id/timeline', getTimeline);
+
+/**
+ * GET /api/trips/:id/map — Get trip map markers and route intelligence
+ */
+router.get('/:id/map', getTripMap);
 
 /**
  * POST /api/trips/:id/stops — Create a new stop
